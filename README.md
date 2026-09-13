@@ -1,4 +1,4 @@
-# Watcher — On-Chain Behavioral Security Protocol
+# Watcher — Behavioral Security Protocol
 
 > The security layer for self-custody.
 
@@ -7,11 +7,12 @@ A self-custody security protocol that detects suspicious withdrawal behavior on-
 🏆 **1st Place Winner — Monad Hackathon São Paulo 2026**  
 🔵 **ETHGlobal ETHOnline 2026 — Continuity Track**
 
-- **Watcher Demo timers:** [`0x4dB4243Fd93e328C5568B3521d27C2c927733CDb`](https://sepolia.etherscan.io/address/0x4dB4243Fd93e328C5568B3521d27C2c927733CDb)
+- **Website:** [Live site](placeholder)
+- **Video:** [Demo walkthrough](placeholder)
 - **Watcher on Sepolia:** [`0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230`](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
-https://sepolia.etherscan.io/address/0xfCAC3d132D632107eBc317a6152E416d73b24F78
-- **LockFi on Monad Testnet (V1):** [`0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
+
 - **Security Design:** [`SECURITY.md`](./SECURITY.md)
+- **LockFi on Monad Testnet (V1):** [`0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
 
 ---
 

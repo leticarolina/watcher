@@ -190,9 +190,6 @@ function ArchitecturePage() {
               key={problem.title}
               className="rounded-xl border border-cloud/15 bg-cloud/5 px-5 py-6 text-center"
             >
-              <span className="text-3xl" aria-hidden="true">
-                {problem.icon}
-              </span>
               <p className="mt-3 font-manrope text-base font-semibold text-cloud">{problem.title}</p>
               <p className="mt-1 font-inter text-sm text-cloud/60">{problem.body}</p>
             </div>
