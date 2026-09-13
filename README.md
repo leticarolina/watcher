@@ -1,13 +1,16 @@
 ![Watcher](frontend/public/WATCHER.png)
 
-# Watcher — Behavioral Security Protocol
+# Watcher
 
-> The security layer for self-custody.
+Behavioral Security Protocol for Self-Custody Wallets.
 
-A self-custody security protocol that detects suspicious withdrawal behavior on-chain and creates a programmable reaction window before funds leave your wallet.
+Watcher detects suspicious withdrawal behavior **on-chain** and creates a reaction window before funds become irreversible.
 
-1. **Monad Hackathon São Paulo 2026**  
-2. **ETHGlobal ETHOnline 2026 — Continuity Track**
+> **Your wallet gets one more chance.**
+
+---
+
+## Live Demo
 
 - **Website:** [Live site](https://watcher-funds.vercel.app/)
 - **Video:** [Demo walkthrough](https://www.loom.com/share/04b42aa22ce34ca186886ed43bfe93e0)
@@ -74,7 +77,7 @@ Trigger: cumulative withdrawals within a rolling 72-hour window exceed 30% of th
 Withdrawal 1: 10% → OK
 Withdrawal 2: 10% → OK
 Withdrawal 3: 11% → Security Queue (cumulative > 30%)
-```
+``` q
 
 ---
 
@@ -160,9 +163,8 @@ Unlike wallet frontends or notification services, Watcher's security guarantees 
 
 ## Testing
 
-Watcher includes a comprehensive Foundry test suite covering normal flows, edge cases, and attack scenarios.
+Watcher includes a Foundry test suite covering normal flows, edge cases, and attack scenarios.
 
-- 100 unit tests — all passing.
 - Branch coverage across every security rule.
 - Integration tests for realistic attack simulations.
 - Invariant tests validating solvency, balance accounting, and queue consistency.
@@ -199,7 +201,7 @@ Example scenarios:
 
 Watcher is the evolution of LockFi, the first-place winner of Monad Hackathon São Paulo 2026.
 
-The protocol was redesigned for ETHGlobal ETHOnline 2026 with behavioral detection improvements, Containment Mode, Trusted Recovery, and optional Ledger authorization.
+The protocol was redesigned as Watcher for ETHGlobal ETHOnline 2026 with behavioral detection improvements, Containment Mode, Trusted Recovery, and optional Ledger authorization.
 
 ---
 
