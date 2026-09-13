@@ -13,9 +13,9 @@ const CREDENTIALS = [
 ] as const
 
 const PROBLEMS = [
-  { icon: '🔓', title: 'Wallet compromise', body: 'Funds drained in seconds.' },
-  { icon: '⚠️', title: 'Human error', body: 'Irreversible transactions.' },
-  { icon: '🕵️', title: 'Slow-drain attacks', body: 'Repeated withdrawals designed to evade detection.' },
+  { title: 'Wallet compromise', body: 'Funds drained in seconds.' },
+  { title: 'Human error', body: 'Irreversible transactions.' },
+  { title: 'Slow-drain attacks', body: 'Repeated withdrawals designed to evade detection.' },
 ] as const
 
 const DETECTION_RULES = [
@@ -166,7 +166,7 @@ function ArchitecturePage() {
       <section className="landing-fade-up mx-auto max-w-3xl px-6 pb-16 pt-20 text-center">
         <p className="font-inter text-sm font-semibold uppercase tracking-widest text-teal">How Watcher Works</p>
         <h1 className="mt-4 font-manrope text-3xl font-bold tracking-tight text-cloud sm:text-4xl">
-          A programmable reaction window for self-custody
+          A reaction window for self-custody
         </h1>
         <p className="mt-5 font-inter text-base text-cloud/70 sm:text-lg">
           Watcher is a self-custody security protocol that adds a programmable reaction window between suspicious
@@ -181,7 +181,7 @@ function ArchitecturePage() {
           The Problem
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center font-inter text-cloud/60">
-          Self-custody gives users complete ownership — but also complete responsibility.
+          Self-custody gives users complete ownership, but also complete responsibility.
         </p>
 
         <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -275,37 +275,6 @@ function ArchitecturePage() {
                 </li>
               ))}
             </ul>
-          </div>
-        </div>
-      </section>
-
-      {/* Concrete example */}
-      <section className="mx-auto max-w-5xl px-6 py-16">
-        <h2 className="text-center font-manrope text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
-          In Practice
-        </h2>
-
-        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-cloud/15 bg-navy/60 p-5">
-            <p className="font-manrope text-sm font-semibold text-cloud/50">Large Withdrawal</p>
-            <pre className="mt-3 overflow-x-auto font-mono text-sm leading-relaxed text-cloud/90">
-              <code>{`Balance: 10 ETH
-Withdrawal: 7 ETH (70%)
-→ flagged, enters Security Queue
-  with a 12h delay`}</code>
-            </pre>
-          </div>
-
-          <div className="rounded-xl border border-cloud/15 bg-navy/60 p-5">
-            <p className="font-manrope text-sm font-semibold text-cloud/50">Probe Detection</p>
-            <pre className="mt-3 overflow-x-auto font-mono text-sm leading-relaxed text-cloud/90">
-              <code>{`Withdrawal 1: 0.04 ETH (4%)
-→ executes instantly
-
-Withdrawal 2: any amount
-→ Security Queue
-  (flagged as possible probe)`}</code>
-            </pre>
           </div>
         </div>
       </section>
