@@ -1,3 +1,5 @@
+![Watcher](frontend/public/WATCHER.png)
+
 # Watcher — Behavioral Security Protocol
 
 > The security layer for self-custody.
