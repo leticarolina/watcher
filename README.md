@@ -4,7 +4,7 @@
 
 A self-custody security protocol that detects suspicious withdrawal behavior on-chain and creates a programmable reaction window before funds leave your wallet.
 
-🏆 **1st Place Winner — Monad Hackathon São Paulo 2026**  
+🏆 **Monad Hackathon São Paulo 2026**  
 🔵 **ETHGlobal ETHOnline 2026 — Continuity Track**
 
 - **Website:** [Live site](placeholder)
