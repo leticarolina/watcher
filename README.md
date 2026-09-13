@@ -1,131 +1,107 @@
-# 🔒 LockFi — Smart Vault Security Protocol
+# Watcher — On-Chain Behavioral Security Protocol
 
-**LockFi** is a self-custody smart vault that protects your funds from instant drainage by introducing behavioral risk detection on withdrawals.
+> The security layer for self-custody.
 
-Instead of letting funds exit immediately, LockFi evaluates every withdrawal attempt against a set of rules designed to detect real attack patterns. Suspicious withdrawals are delayed — not blocked — giving you a reaction window to cancel, lock your vault, or move funds to a pre-registered safe address.
+A self-custody security protocol that detects suspicious withdrawal behavior on-chain and creates a programmable reaction window before funds leave your wallet.
 
-> **The Vision:** Instant fund drainage should not be the industry standard. Users deserve a fair window of time to react to threats.
+🏆 **1st Place Winner — Monad Hackathon São Paulo 2026**  
+🔵 **ETHGlobal ETHOnline 2026 — Continuity Track**
 
-🏆 **1st Place Winner — Monad Hackathon**
-
-- **Smart Contract:** [`LockFi.sol`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
-- **Live Demo:** [lock-fi.vercel.app](https://lock-fi.vercel.app/)
+- **Watcher Demo timers:** [`0x4dB4243Fd93e328C5568B3521d27C2c927733CDb`](https://sepolia.etherscan.io/address/0x4dB4243Fd93e328C5568B3521d27C2c927733CDb)
+- **Watcher on Sepolia:** [`0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230`](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
+https://sepolia.etherscan.io/address/0xfCAC3d132D632107eBc317a6152E416d73b24F78
+- **LockFi on Monad Testnet (V1):** [`0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
 - **Security Design:** [`SECURITY.md`](./SECURITY.md)
 
 ---
 
 ## The Problem
 
-In crypto today:
+Self-custody gives users complete ownership — but also complete responsibility.
 
-- **Compromised wallet** → funds drained in seconds, no recourse.
-- **Fat-finger error** → transaction sent, nothing you can do.
-- **Slow drain attack** → attacker extracts gradually, staying under the radar.
-- **Safe address hijack** → attacker reroutes your recovery address before you notice.
+- Wallet compromise → funds drained in seconds.
+- Human error → irreversible transactions.
+- Slow-drain attacks → repeated withdrawals designed to avoid detection.
 
-Everything happens at blockchain speed. One mistake or one compromised key, and it's over.
+Today's wallets execute transactions immediately. Watcher adds time when behavior becomes suspicious.
 
 ---
 
-## The Solution
+## How Watcher Works
 
-LockFi sits between your funds and the outside world. Every withdrawal is evaluated before it executes.
+Watcher sits between your funds and the outside world. Every withdrawal is evaluated before it executes. Suspicious ones enter a time-delayed Security Queue — giving you time to react before anything irreversible happens.
 
 **🟢 Small, normal amount** — executes instantly.  
-**🟠 Large or suspicious amount** — enters pending queue with a 12h delay.  
+**🟠 Large or suspicious amount** — enters Security Queue with a 12h delay.  
 **🟠 Any withdrawal after a small probe** — flagged by pattern detection, 12h delay.  
-**🟠 Cumulative drain over 72h** — flagged by time-window tracking, 12h delay.
+**🟠 Cumulative drain over 72h** — flagged by rolling window tracking, 12h delay.
 
 If something looks wrong, you have time to act:
 
-1. **Cancel** the pending withdrawal — funds return to your vault immediately.
-2. **Lock the vault** — freeze all outgoing activity for up to 30 days.
-3. **Withdraw to safe address** — route everything to a pre-registered trusted address.
+1. **Cancel** the queued withdrawal — funds return to your vault immediately.
+2. **Containment Mode** — freeze all outgoing activity for up to 30 days.
+3. **Recover Funds** — route to your pre-registered Trusted Recovery Address.
 
 ---
 
-## Risk Detection Rules
+## Security Engine
 
-### Rule 1 — Large Withdrawal
+### Behavior Detection Rules
 
-**Trigger:** Withdrawal exceeds 60% of your vault balance.
+**Rule 1 — Large Withdrawal**  
+Trigger: withdrawal exceeds 60% of vault balance.
 
 ```solidity
 Balance: 10 ETH
-Withdrawal: 7 ETH (70%) → Flagged, 12h delay
+Withdrawal: 7 ETH (70%) → Security Queue, 12h delay
 ```
 
-Defends against instant full-balance drain after wallet compromise.
-
----
-
-### Rule 2 — Test-Probe Pattern
-
-**Trigger:** Your previous withdrawal was less than 5% of balance.
+**Rule 2 — Probe Transaction Detection**  
+Trigger: previous withdrawal was less than 5% of balance.
 
 ```solidity
-Withdrawal 1: 0.04 ETH (4%) → Executes instantly
-Withdrawal 2: Any amount   → Flagged, 12h delay
+Withdrawal 1: 0.04 ETH (4%) → executes instantly
+Withdrawal 2: any amount   → Security Queue, 12h delay
 ```
 
-Defends against staged attacks where an attacker first sends a small "test" transaction to verify wallet access before attempting a larger drain.
-
----
-
-### Rule 3 — Cumulative Time Window
-
-**Trigger:** Total withdrawals within the last 72 hours exceed 30% of your balance.
+**Rule 3 — Rolling Window Analysis**  
+Trigger: cumulative withdrawals within a rolling 72-hour window exceed 30% of the user's vault balance.
 
 ```solidity
-Balance: 10 ETH
 Withdrawal 1: 10% → OK
 Withdrawal 2: 10% → OK
-Withdrawal 3: 11% → Flagged (cumulative > 30%)
+Withdrawal 3: 11% → Security Queue (cumulative > 30%)
 ```
-
-Defends against slow-drain attacks where an attacker extracts gradually to avoid triggering Rule 1.
 
 ---
 
 ## Key Features
 
-### Withdrawal Lifecycle
+### Security Queue
 
-- Every withdrawal is either instant or enters a **12-hour pending queue**.
-- Only **one pending withdrawal** per user — prevents spamming to exhaust the delay mechanism.
-- Pending withdrawals can be **cancelled at any time**, returning funds to the vault instantly.
+- Flagged withdrawals enter a 12-hour cancellable queue.
+- Only one pending withdrawal per user at a time.
+- Cancel at any time — funds return instantly.
 
-### Emergency Lock
+### Containment Mode (Emergency Lock)
 
-- Freeze all vault activity for a **user-defined duration** (1 hour to 30 days).
-- Lock can only be **extended, never shortened** — an attacker cannot reduce your lock to regain access sooner.
-- Blocks all withdrawals, pending executions, and safe address changes while active.
+- Freeze all vault activity for 1 hour to 30 days.
+- Extension-only by design — an attacker can never shorten an active containment window after compromising a wallet.
+- Auto-cancels any pending withdrawal on activation.
+- Blocks all withdrawals, executions, and address changes while active.
 
-### Safe Address Recovery
+### Trusted Recovery Address
 
-- Register a **trusted recovery address** as a permanent exit path.
-- Changing the safe address requires a **24-hour delay** — prevents attackers from rerouting it before you can react.
-- Safe address changes are **blocked during emergency lock**.
-- `withdrawToSafe` sends your entire balance to the safe address in one transaction.
+- Register a trusted recovery wallet that can receive funds immediately during an emergency.
+- Changes require a 24-hour delay — blocked during Containment Mode.
+- `withdrawToSafe(amount)` sends any amount to your recovery address instantly.
 
----
+### Ledger Hardware Authorization (Optional)
 
-## How It Works
-
-**Normal withdrawal flow:**
-
-1. User deposits ETH into the vault
-2. User requests a withdrawal
-3. LockFi evaluates the risk — instant if safe, 12h pending queue if suspicious
-4. If pending: user waits and executes, or cancels immediately if it wasn't them
-
-**If the vault is ever at risk:**
-
-1. Detect suspicious activity
-2. Trigger emergency lock (1 hour to 30 days — nothing moves)
-3. Cancel any pending withdrawal if one was queued by the attacker
-4. Wait for the lock to expire
-5. Withdraw everything to your pre-registered safe address
+- Register your Ledger-derived address as a required co-signer for Authorize Withdrawal.
+- On-chain enforcement — the contract itself verifies the hardware signature.
+- If Ledger enforcement is enabled, flagged withdrawals require a valid signature from the registered Ledger-derived signer before execution.
+- Changes require a 24-hour delay — blocked during Containment Mode.
 
 ---
 
@@ -133,73 +109,97 @@ Defends against slow-drain attacks where an attacker extracts gradually to avoid
 
 ```solidity
 // Core vault
-deposit()                              // Deposit native token
-withdraw(uint256 amount)               // Initiate withdrawal — instant or delayed
-executeWithdraw()                      // Execute after delay expires
-cancelWithdraw()                       // Cancel pending withdrawal
+deposit()                                          // Deposit native ETH into the vault
+withdraw(uint256 amount)                           // Initiate withdrawal — instant or enters Security Queue
+executeWithdraw(bytes calldata signature)           // Authorize withdrawal after 12h delay — requires Ledger signature if registered
+cancelWithdraw()                                   // Cancel queued withdrawal — funds return instantly
 
-// Emergency
-emergencyLock(uint256 duration)        // Lock vault (1h to 30 days)
+// Recovery & Containment
+emergencyLock(duration)                            // Freeze all activity for 1h to 30d
+withdrawToSafe(amount)                             // Send funds to Trusted Recovery Address instantly
+setSafeAddress(...)                                // Register Trusted Recovery Address
+requestSafeAddressChange(...)                      // Request change — 24h delay, blocked during Containment Mode   
 
-// Safe address
-setSafeAddress(address _safe)          // Register recovery address (first time)
-requestSafeAddressChange(address)      // Request change (24h delay)
-confirmSafeAddressChange()             // Confirm after delay
-cancelSafeAddressChange()              // Cancel pending change
-withdrawToSafe()                       // Send full balance to safe address
-
-// View helpers
-getUserState(address)                  // Full vault state in one call
-getInstantWithdrawLimit(address)       // Max amount that executes instantly
-getRemainingPendingTime(address)       // Time left on pending withdrawal
-getRemainingLockTime(address)          // Time left on emergency lock
+// Ledger Hardware Authorization
+registerLedgerSigner(address signer)               // Register Ledger-derived address (first time, no delay)
+requestLedgerSignerChange(address newSigner)       // Request change or removal — 24h delay, blocked during Containment Mode
+confirmLedgerSignerChange()                        // Confirm after delay — address(0) removes enforcement
+cancelLedgerSignerChange()                         // Cancel pending change — always allowed
 ```
 
 ---
 
 ## Security Architecture
 
-- **ReentrancyGuard** on all functions that transfer ETH.
-- **Checks-Effects-Interactions** pattern throughout — balance deducted before ETH sent.
+- **Behavioral detection** — Detects suspicious withdrawal behavior before execution instead of relying on static permissions.
+- **On-chain hardware enforcement** — Ledger signatures are verified inside the smart contract for flagged withdrawals when enabled.
+- **Containment Mode** — Extension-only lock prevents shortening an active emergency lock after compromise.
 - **Per-user state isolation** — no shared pools, no cross-user risk.
-- **Extension-only lock** — `lockedUntil` can only move forward in time.
-- **Behavioral detection** — risk rules operate on pattern history, not just single transaction amounts.
+- **Checks-Effects-Interactions + ReentrancyGuard**
 
-For full design rationale, threat model, and audit guidance see [`SECURITY.md`](./SECURITY.md).
+Full threat model, attack scenarios, and audit guidance: [`SECURITY.md`](./SECURITY.md)
+
+---
+
+## Why Watcher Is Different
+
+Unlike wallet frontends or notification services, Watcher's security guarantees are enforced by the smart contract itself.
+
+| Traditional Wallets | Watcher |
+| --------------------- | --------- |
+| Execute immediately | Delay suspicious withdrawals |
+| Frontend warnings only | On-chain behavioral enforcement |
+| Recovery depends on user speed | Built-in Security Queue and Recovery Path |
+| Compromised key can execute | Optional Ledger signature required |
+| No reaction window | 12-hour programmable reaction window |
 
 ---
 
 ## Testing
 
-Test coverage includes unit tests across all functions and edge cases, plus invariant tests verifying solvency, balance integrity, and state consistency under arbitrary call sequences.
+Watcher includes a comprehensive Foundry test suite covering normal flows, edge cases, and attack scenarios.
+
+- 100 unit tests — all passing.
+- Branch coverage across every security rule.
+- Integration tests for realistic attack simulations.
+- Invariant tests validating solvency, balance accounting, and queue consistency.
+
+Example scenarios:
+
+- Large withdrawal attack.
+- Probe transaction attack.
+- Slow-drain attack.
+- Safe address hijack attempt.
+- Containment Mode bypass attempt.
+- Ledger authorization enforcement.
 
 ---
 
 ## Known Limitations
 
-- Native token only (ETH / MON). ERC-20 support is planned.
+- Native ETH only. ERC-20 support planned.
 - Rule thresholds are hardcoded constants. Configurable thresholds are a future consideration.
-- `lastWithdrawPercent` (Rule 2 probe detection) persists indefinitely. A user who once made a small withdrawal will have their next withdrawal delayed regardless of elapsed time. The cancel mechanism mitigates this.
-
-### NFT Support *(coming V3)*
-
-- Deposit and secure ERC-721 NFTs inside the vault.
-- All NFT withdrawals subject to a flat 12-hour delay — no exceptions.
-- High-value NFTs deserve the same reaction window as funds.
+- `lastWithdrawPercent` (Rule 2) persists indefinitely — a user who once made a small withdrawal will have their next withdrawal delayed regardless of elapsed time.
+- Watcher currently protects assets deposited into the protocol. It does not monitor arbitrary EOA transactions outside the vault.
 
 ---
 
 ## Stack
 
 - **Smart Contract:** Solidity 0.8.20, Foundry, OpenZeppelin
-- **Frontend:** React, wagmi, RainbowKit, Next.js
-- **Network:** Monad Testnet
+- **Frontend:** React, wagmi, viem, Next.js
+- **Network:** Ethereum Sepolia
+
+---
+
+## Project History
+
+Watcher is the evolution of LockFi, the first-place winner of Monad Hackathon São Paulo 2026.
+
+The protocol was redesigned for ETHGlobal ETHOnline 2026 with behavioral detection improvements, Containment Mode, Trusted Recovery, and optional Ledger authorization.
 
 ---
 
 ## Authorship
 
-**Leticia Azevedo** — Smart Contract Architecture & Lead Dev  
-**Shaiane Viana** — UI/UX Design
-
-Built with 💜 for the Monad ecosystem.
+**Leticia Azevedo** (@letiweb3) — Smart Contract Developer & Security Design.

@@ -1,91 +1,32 @@
-# LockFi — Secure Withdrawal Protocol
+# React + TypeScript + Vite
 
-A Web3 security protocol frontend built with **React + Tailwind CSS**.
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
-![LockFi](https://img.shields.io/badge/LockFi-Protocol-00e5a0?style=for-the-badge)
+Currently, two official plugins are available:
 
-## Quick Start
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-```bash
-# 1. Install dependencies
-npm install
+## React Compiler
 
-# 2. Start dev server
-npm run dev
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-# 3. Open in browser
-# → http://localhost:5173
+## Expanding the Oxlint configuration
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
 ```
 
-## Project Structure
-
-```
-lockfi/
-├── public/
-├── src/
-│   ├── components/
-│   │   ├── Dashboard.jsx        # Main dashboard (Mode A & B)
-│   │   ├── DepositSection.jsx   # Deposit ETH input + button
-│   │   ├── Header.jsx           # Top bar with wallet info
-│   │   ├── LandingScreen.jsx    # Pre-connect landing page
-│   │   ├── PendingCard.jsx      # Pending withdrawal card + countdown
-│   │   ├── ShieldIcon.jsx       # SVG shield logo
-│   │   ├── VaultInfo.jsx        # Balance + instant limit display
-│   │   └── WithdrawSection.jsx  # Withdraw input + risk warnings
-│   ├── context/
-│   │   └── VaultContext.jsx     # Global state (mock data + logic)
-│   ├── hooks/
-│   │   └── useCountdown.js      # Countdown timer hook
-│   ├── App.jsx                  # Root component (routing)
-│   ├── index.css                # Tailwind + custom styles
-│   └── main.jsx                 # Entry point
-├── index.html
-├── package.json
-├── tailwind.config.js
-├── postcss.config.js
-└── vite.config.js
-```
-
-## UI States
-
-| State | What Shows |
-|-------|-----------|
-| Wallet NOT connected | Landing screen with Connect Wallet button |
-| Connected, no pending | Dashboard Mode A — balance, deposit, withdraw |
-| Connected, pending exists | Dashboard Mode B — balance, deposit, pending card (withdraw disabled) |
-
-## Mock Behavior
-
-The app uses mock data for now. Smart contract integration comes later.
-
-- **Deposits**: Always instant, increases balance
-- **Withdrawals ≤ 60%**: Instant, decreases balance
-- **Withdrawals > 60%**: Flagged → creates pending withdrawal with 60s countdown
-- **Execute**: Enabled after countdown ends
-- **Cancel**: Always available, returns funds to balance
-
-## Smart Contract Integration (Next Phase)
-
-Replace mock logic in `VaultContext.jsx` with real calls:
-
-```
-deposit()           → DepositSection button
-withdraw(amount)    → WithdrawSection button
-executeWithdraw()   → PendingCard execute button
-cancelWithdraw()    → PendingCard cancel button
-```
-
-Events to listen:
-```
-Deposited
-WithdrawalRequested
-WithdrawalExecuted
-WithdrawalCancelled
-```
-
-## Tech Stack
-
-- React 18
-- Tailwind CSS 3.4
-- Vite 5
-- IBM Plex Mono + Syne fonts (Google Fonts)
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.

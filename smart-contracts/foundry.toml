@@ -16,4 +16,7 @@ runs = 256
 depth = 50
 call_override = false
 
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

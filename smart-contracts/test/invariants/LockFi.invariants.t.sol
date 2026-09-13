@@ -1,8 +1,8 @@
+pragma solidity ^0.8.20;
 ///@notice will come back to this test after refactoring, a couple test are currently broken due to changes in the contract and needs to be updated to match the new logic.
 /// The structure and approach of the test should still be valid, but the specific function calls and invariant checks will need to be revised to align with the updated contract code.
 
 // // SPDX-License-Identifier: MIT
-// pragma solidity ^0.8.20;
 
 // import {Test} from "forge-std/Test.sol";
 // import {StdInvariant} from "forge-std/StdInvariant.sol";
