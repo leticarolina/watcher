@@ -7,8 +7,8 @@ A self-custody security protocol that detects suspicious withdrawal behavior on-
 1. **Monad Hackathon São Paulo 2026**  
 2. **ETHGlobal ETHOnline 2026 — Continuity Track**
 
-- **Website:** [Live site](placeholder)
-- **Video:** [Demo walkthrough](placeholder)
+- **Website:** [Live site](https://watcher-funds.vercel.app/)
+- **Video:** [Demo walkthrough](https://www.loom.com/share/04b42aa22ce34ca186886ed43bfe93e0)
 - **Watcher on Sepolia:** [`0x4dB4243Fd93e328C5568B3521d27C2c927733CDb`](https://sepolia.etherscan.io/address/0x4dB4243Fd93e328C5568B3521d27C2c927733CDb)
 
 - **Security Design:** [`SECURITY.md`](./SECURITY.md)
