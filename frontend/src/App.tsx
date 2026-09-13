@@ -1017,7 +1017,7 @@ function DashboardApp() {
           centered content column below. */}
       <header className="flex items-center justify-between border-b border-cloud/10 px-6 py-3">
         <Link to="/" className="flex items-center gap-2">
-          <img src="/logo-cloud.png" alt="" className="h-7 w-7" />
+          <img src="/logo-cloud.png" alt="" className="h-7 w-auto" />
           <span className="font-manrope text-lg font-semibold tracking-tight">Watcher</span>
         </Link>
         <div className="flex items-center gap-3">

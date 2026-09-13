@@ -9,6 +9,7 @@ import './index.css'
 import { wagmiConfig } from './lib/wagmiConfig.ts'
 import DashboardApp from './App.tsx'
 import LandingPage from './LandingPage.tsx'
+import ArchitecturePage from './ArchitecturePage.tsx'
 
 const queryClient = new QueryClient()
 
@@ -20,6 +21,7 @@ createRoot(document.getElementById('root')!).render(
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/architecture" element={<ArchitecturePage />} />
               <Route path="/app" element={<DashboardApp />} />
             </Routes>
           </BrowserRouter>

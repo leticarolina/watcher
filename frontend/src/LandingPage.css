@@ -1,20 +1,9 @@
 /* Landing page reveal animations. Split out from index.css since these are
    page-specific, not shared theme tokens. */
 
-@keyframes landing-watcher-rise {
-  from {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
 @keyframes landing-fade-up {
   from {
-    transform: translateY(12px);
+    transform: translateY(14px);
     opacity: 0;
   }
   to {
@@ -23,27 +12,76 @@
   }
 }
 
-.landing-watcher-rise {
+.landing-fade-up {
   opacity: 0;
-  animation: landing-watcher-rise 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: landing-fade-up 600ms ease-out forwards;
 }
 
-.landing-tagline-fade {
-  opacity: 0;
-  animation: landing-fade-up 700ms ease-out 450ms forwards;
+.landing-delay-1 {
+  animation-delay: 80ms;
+}
+.landing-delay-2 {
+  animation-delay: 180ms;
+}
+.landing-delay-3 {
+  animation-delay: 300ms;
+}
+.landing-delay-4 {
+  animation-delay: 420ms;
 }
 
-.landing-cta-fade {
+/* Credential badge cards slide in from the left, staggered per-card via an
+   inline animation-delay (see LandingPage.tsx) rather than fixed delay
+   classes, since the number of cards can change. */
+@keyframes landing-badge-slide-in {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.landing-badge-slide-in {
   opacity: 0;
-  animation: landing-fade-up 700ms ease-out 750ms forwards;
+  animation: landing-badge-slide-in 500ms ease-out forwards;
+}
+
+/* Ambient rotation on the orbit rings behind the logo. */
+@keyframes landing-orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.landing-orbit-ring {
+  animation: landing-orbit-spin 30s linear infinite;
+}
+
+.landing-orbit-ring-reverse {
+  animation: landing-orbit-spin 40s linear infinite reverse;
 }
 
 /* Respect reduced-motion preference: skip the animation entirely and show
    the settled state immediately rather than just shortening durations. */
 @media (prefers-reduced-motion: reduce) {
-  .landing-watcher-rise,
-  .landing-tagline-fade,
-  .landing-cta-fade {
+  .landing-fade-up {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .landing-orbit-ring,
+  .landing-orbit-ring-reverse {
+    animation: none;
+  }
+
+  .landing-badge-slide-in {
     animation: none;
     opacity: 1;
     transform: none;
