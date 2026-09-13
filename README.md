@@ -77,7 +77,7 @@ Trigger: cumulative withdrawals within a rolling 72-hour window exceed 30% of th
 Withdrawal 1: 10% → OK
 Withdrawal 2: 10% → OK
 Withdrawal 3: 11% → Security Queue (cumulative > 30%)
-``` q
+``` 
 
 ---
 
