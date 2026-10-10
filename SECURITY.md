@@ -82,7 +82,7 @@ An attacker with a compromised key attempts to remove the Ledger signer requirem
 
 ---
 
-## V3 Additions — ETHGlobal ETHOnline 2026
+## Additions — ETHGlobal ETHOnline 2026
 
 ### Ledger Hardware Authorization
 

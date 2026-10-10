@@ -4,12 +4,12 @@
 
 A self-custody security protocol that detects suspicious withdrawal behavior on-chain and creates a programmable reaction window before funds leave your wallet.
 
-🏆 **Monad Hackathon São Paulo 2026**  
+🏆 **1st Place Winner — Monad Hackathon São Paulo 2026**  
 🔵 **ETHGlobal ETHOnline 2026 — Continuity Track**
 
 - **Website:** [Live site](placeholder)
 - **Video:** [Demo walkthrough](placeholder)
-- **Watcher with demo values:** [`0x4dB4243Fd93e328C5568B3521d27C2c927733CDb`](https://sepolia.etherscan.io/address/0x4dB4243Fd93e328C5568B3521d27C2c927733CDb)
+- **Watcher on Sepolia:** [`0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230`](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
 
 - **Security Design:** [`SECURITY.md`](./SECURITY.md)
 - **LockFi on Monad Testnet (V1):** [`0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
@@ -72,7 +72,7 @@ Trigger: cumulative withdrawals within a rolling 72-hour window exceed 30% of th
 Withdrawal 1: 10% → OK
 Withdrawal 2: 10% → OK
 Withdrawal 3: 11% → Security Queue (cumulative > 30%)
-```
+``` 
 
 ---
 
@@ -158,9 +158,8 @@ Unlike wallet frontends or notification services, Watcher's security guarantees 
 
 ## Testing
 
-Watcher includes a comprehensive Foundry test suite covering normal flows, edge cases, and attack scenarios.
+Watcher includes a Foundry test suite covering normal flows, edge cases, and attack scenarios.
 
-- 100 unit tests — all passing.
 - Branch coverage across every security rule.
 - Integration tests for realistic attack simulations.
 - Invariant tests validating solvency, balance accounting, and queue consistency.
@@ -197,7 +196,7 @@ Example scenarios:
 
 Watcher is the evolution of LockFi, the first-place winner of Monad Hackathon São Paulo 2026.
 
-The protocol was redesigned for ETHGlobal ETHOnline 2026 with behavioral detection improvements, Containment Mode, Trusted Recovery, and optional Ledger authorization.
+The protocol was redesigned as Watcher for ETHGlobal ETHOnline 2026 with behavioral detection improvements, Containment Mode, Trusted Recovery, and optional Ledger authorization.
 
 ---
 
