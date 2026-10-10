@@ -1,15 +1,20 @@
-# Watcher — Behavioral Security Protocol
+![Watcher](frontend/public/WATCHER.png)
 
-> The security layer for self-custody.
+# Watcher
 
-A self-custody security protocol that detects suspicious withdrawal behavior on-chain and creates a programmable reaction window before funds leave your wallet.
+Behavioral Security Protocol for Self-Custody Wallets.
 
-🏆 **1st Place Winner — Monad Hackathon São Paulo 2026**  
-🔵 **ETHGlobal ETHOnline 2026 — Continuity Track**
+Watcher detects suspicious withdrawal behavior **on-chain** and creates a reaction window before funds become irreversible.
 
-- **Website:** [Live site](placeholder)
-- **Video:** [Demo walkthrough](placeholder)
-- **Watcher on Sepolia:** [`0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230`](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
+> **Your wallet gets one more chance.**
+
+---
+
+## Live Demo
+
+- **Website:** [Live site](https://watcher-funds.vercel.app/)
+- **Video:** [Demo walkthrough](https://www.loom.com/share/04b42aa22ce34ca186886ed43bfe93e0)
+- **Watcher on Sepolia:** [`0x4dB4243Fd93e328C5568B3521d27C2c927733CDb`](https://sepolia.etherscan.io/address/0x4dB4243Fd93e328C5568B3521d27C2c927733CDb)
 
 - **Security Design:** [`SECURITY.md`](./SECURITY.md)
 - **LockFi on Monad Testnet (V1):** [`0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8`](https://testnet.monadscan.com/address/0x0919Df3678039BCe59abdD19D7bf9e7D1b7eb5d8)
@@ -72,7 +77,7 @@ Trigger: cumulative withdrawals within a rolling 72-hour window exceed 30% of th
 Withdrawal 1: 10% → OK
 Withdrawal 2: 10% → OK
 Withdrawal 3: 11% → Security Queue (cumulative > 30%)
-``` 
+```
 
 ---
 
