@@ -2,7 +2,7 @@
 
 **Author:** Leticia Azevedo  
 **Contract:** `Watcher.sol`
-**Version:** V3 — ETHGlobal ETHOnline 2026
+**Version:** V2 — ETHGlobal ETHOnline 2026
 **Last Updated:** September 2026
 **Deployed:** [Sepolia — 0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
 
@@ -82,7 +82,7 @@ An attacker with a compromised key attempts to remove the Ledger signer requirem
 
 ---
 
-## V3 Additions — ETHGlobal ETHOnline 2026
+## Additions — ETHGlobal ETHOnline 2026
 
 ### Ledger Hardware Authorization
 
