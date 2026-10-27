@@ -11,12 +11,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  * delayed instead of executed immediately, giving users a reaction window to cancel, lock the
  * vault, or route funds to a pre-registered safe address before any funds leaves the contract.
  * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold (>60%),
- * test-probe pattern detection (<5% followed by any withdrawal), and cumulative 72-hour window
+ * test-probe pattern detection (<5% followed by any withdrawal within 72 hours), and cumulative 72-hour window
  * tracking (>30%). Each user's state is fully isolated. Emergency lock accepts a user-defined
  * duration (1h to 30 days) and can only be extended, never shortened. Safe address changes
  * require a 24-hour delay and are blocked during emergency lock.
- * Deployed on Monad Testnet. 1st Place — Monad Hackathon 2026.
  */
+
 contract Watcher is ReentrancyGuard {
     error AmountZero();
     error InsufficientBalance(uint256 balance);
@@ -35,6 +35,8 @@ contract Watcher is ReentrancyGuard {
     error DurationTooShort();
     error DurationTooLong();
     error LockNotExtended();
+    error InvalidSafeSlot();
+    error SafeAddressNotRegistered();
 
     uint256 public constant DELAY = 12 hours;
     uint256 public constant MIN_LOCK_DURATION = 1 hours;
@@ -42,14 +44,14 @@ contract Watcher is ReentrancyGuard {
     uint256 public constant SAFE_ADDRESS_CHANGE_DELAY = 24 hours;
     uint256 public constant WINDOW_DURATION_FOR_MAX_WITHDRAW = 72 hours;
     uint256 public constant MAX_INSTANT_WITHDRAW_PERCENT = 30;
+    uint256 public constant PROBE_WINDOW = 72 hours;
 
     mapping(address => uint256) public balances; //Tracks withdrawable funds
     mapping(address => WithdrawalRequest) public pendingWithdraw; // Pending withdrawals per user
-    mapping(address => uint256) public lastWithdrawPercent; // Tracks last withdrawal %.
+    mapping(address => uint256) public lastProbeTime; // Timestamp of last executed probe withdrawal (<5%), 0 = no probe
     mapping(address => uint256 endTimeout) public lockedUntil; // Tracks until when withdrawal is locked for that user
-    mapping(address => address) public safeAddress; //safe address for each user, used as recovery in case of compromise.
-    mapping(address => address) public pendingSafeAddress; //pending safe address change, requires delay before execution.
-    mapping(address => uint256) public safeChangeUnlockTime; // Tracks when pending safe address change can be executed.
+    mapping(address => address[2]) public safeAddresses; // Two trusted recovery slots per user: 0 = primary, 1 = backup.
+    mapping(address => PendingSafeChange) public pendingSafeChange; // Pending safe address change, requires delay before execution.
     mapping(address => uint256) public withdrawnInWindow; // Tracks cumulative withdrawn % in current window for each user
     mapping(address => uint256) public windowStartTime; // Tracks start time of current window for cumulative withdrawal %
 
@@ -58,6 +60,13 @@ contract Watcher is ReentrancyGuard {
         uint256 amount;
         uint256 unlockTime; // When execution allowed
         uint256 requestTime; // Timestamp created
+    }
+
+    //Pending safe address change, each user can only have ONE pending change.
+    struct PendingSafeChange {
+        address newSafe; // Address to write into the slot, address(0) = no pending change
+        uint8 slot; // Target slot (0 or 1)
+        uint64 unlockTime; // When confirmation is allowed
     }
 
     //EVENTS
@@ -73,12 +82,21 @@ contract Watcher is ReentrancyGuard {
     event EmergencyLockActivated(address indexed user, uint256 lockedUntil);
     event SafeAddressSet(address indexed user, address safe);
     event SafeAddressChangeRequested(
+        address indexed user,
         address indexed previousSafe,
         address indexed newSafe,
+        uint8 slot,
         uint256 unlockTime
     );
-    event SafeAddressChangeConfirmed(address indexed user, address newSafe);
-    event SafeAddressChangeCancelled(address indexed user); //should show cancelled address too
+    event SafeAddressChangeConfirmed(
+        address indexed user,
+        address newSafe,
+        uint8 slot
+    );
+    event SafeAddressChangeCancelled(
+        address indexed user,
+        address cancelledSafe
+    );
     event WithdrawToSafe(address indexed user, address safe, uint256 amount);
 
     /// @notice Deposit native token into the vault.
@@ -126,8 +144,7 @@ contract Watcher is ReentrancyGuard {
         }
 
         bool risky = _isRisky(msg.sender, amount, userBalance); //Determine whether withdrawal is risky
-        uint256 withdrawPercent = (amount * 100) / userBalance; // Calculate withdrawal percentage for lastWithdrawPercent tracking
-        lastWithdrawPercent[msg.sender] = withdrawPercent; // Update last withdrawal %
+        uint256 withdrawPercent = (amount * 100) / userBalance; // Calculate withdrawal percentage for window tracking
         balances[msg.sender] -= amount; // Deduct balance immediately
 
         //if risky - create a pending request
@@ -152,6 +169,7 @@ contract Watcher is ReentrancyGuard {
 
         // Send funds immediately if not risky and update withdrawal window tracking
         _updateWithdrawWindow(msg.sender, withdrawPercent);
+        _recordProbe(msg.sender, amount, userBalance);
         _sendEth(msg.sender, amount);
 
         emit WithdrawalExecuted(msg.sender, amount);
@@ -170,6 +188,7 @@ contract Watcher is ReentrancyGuard {
         if (block.timestamp < req.unlockTime) {
             revert TimeoutNotOver();
         }
+        // Defense-in-depth: unreachable, emergencyLock cancels pending withdrawals
         if (block.timestamp < lockedUntil[msg.sender]) {
             revert EmergencyLockOngoing();
         }
@@ -179,14 +198,15 @@ contract Watcher is ReentrancyGuard {
         uint256 balanceBeforeRequest = balances[msg.sender] + executeAmount;
         uint256 percent = (executeAmount * 100) / balanceBeforeRequest;
         _updateWithdrawWindow(msg.sender, percent);
+        _recordProbe(msg.sender, executeAmount, balanceBeforeRequest);
         _sendEth(msg.sender, executeAmount);
 
         emit WithdrawalExecuted(msg.sender, executeAmount);
     }
 
     /// @notice Cancel a pending withdrawal and restore funds to the vault balance.
-    /// @dev intentionally does NOT reset lastWithdrawPercent. Resetting would allow an attacker
-    /// to erase their probe history by cancelling a flagged withdrawal and repeating the sequence.
+    /// @dev intentionally does NOT touch lastProbeTime. It is only written when funds actually leave
+    /// the vault, so an attacker cannot erase their probe history by cancelling a flagged withdrawal.
     /// Cancellation is permitted during emergency lock.
     function cancelWithdraw() external {
         WithdrawalRequest storage req = pendingWithdraw[msg.sender];
@@ -240,7 +260,8 @@ contract Watcher is ReentrancyGuard {
     /// @notice Evaluates whether a withdrawal should be delayed based on behavioral risk rules.
     /// @dev Three independent rules are evaluated, any single match flags the withdrawal as risky.
     /// Rule 1: amount exceeds 60% of current balance — defends against instant full-balance drain.
-    /// Rule 2: lastWithdrawPercent < 5% — defends against test-probe staged attack pattern.
+    /// Rule 2: a probe (<5% of balance) was executed within the last PROBE_WINDOW — defends against
+    /// test-probe staged attack pattern.
     /// Rule 3: cumulative withdrawals in the last 72 hours exceed 30% — defends against slow drain.
     /// @param user The address being evaluated.
     /// @param amount The withdrawal amount being requested.
@@ -254,12 +275,8 @@ contract Watcher is ReentrancyGuard {
         // RULE 1: amount > 60% of balance
         bool largeWithdrawal = amount > (balance * 60) / 100;
 
-        // RULE 2: last withdrawal < 5%
-        uint256 lastPercent = lastWithdrawPercent[user];
-
-        bool hasPreviousWithdrawal = lastPercent > 0;
-        bool isLastWithdrawSmall = lastPercent < 5;
-        bool suspiciousPattern = hasPreviousWithdrawal && isLastWithdrawSmall;
+        // RULE 2: probe (< 5%) executed within the last PROBE_WINDOW
+        bool suspiciousPattern = _isProbeActive(user);
 
         // RULE 3: cumulative withdrawals in last 72h > 30% of balance
         uint256 currentPercent = (amount * 100) / balance;
@@ -278,6 +295,29 @@ contract Watcher is ReentrancyGuard {
         }
 
         return largeWithdrawal || suspiciousPattern || cumulativeExceeded;
+    }
+
+    /// @notice Returns true if the user's last executed withdrawal was a probe within PROBE_WINDOW.
+    function _isProbeActive(address user) internal view returns (bool) {
+        uint256 probeTime = lastProbeTime[user];
+        return probeTime != 0 && block.timestamp <= probeTime + PROBE_WINDOW;
+    }
+
+    /// @notice Records whether an executed withdrawal was a probe (< 5% of balance).
+    /// @dev Called only when funds actually leave the vault, never at queue time, so cancelling a
+    /// pending withdrawal cannot erase a probe. Comparison avoids division so tiny amounts are not
+    /// rounded down to 0%.
+    /// @param user The address whose probe state is being updated.
+    /// @param amount The executed withdrawal amount.
+    /// @param balance The user's vault balance before the withdrawal was deducted.
+    function _recordProbe(
+        address user,
+        uint256 amount,
+        uint256 balance
+    ) internal {
+        lastProbeTime[user] = amount * 10_000 < balance * 500
+            ? block.timestamp
+            : 0;
     }
 
     /// @notice Sends ETH to a recipient address using a low-level call.
@@ -326,46 +366,58 @@ contract Watcher is ReentrancyGuard {
     ============================================================
     */
 
-    /// @notice Register a trusted recovery address for the first time.
+    /// @notice Register the first trusted recovery address (slot 0).
     /// @dev No delay required for initial setup — there is no existing safe address to protect.
-    /// Once set, use requestSafeAddressChange to change it. The safe address is the destination for withdrawToSafe.
+    /// Only allowed while both slots are empty. Once set, use requestSafeAddressChange to add a
+    /// backup in slot 1 or replace either slot. Registered addresses are the only valid
+    /// destinations for withdrawToSafe.
     /// @param _safe The trusted recovery address to register.
     function setSafeAddress(address _safe) external {
         if (_safe == address(0)) {
             revert InvalidSafeAddress();
         }
 
-        if (safeAddress[msg.sender] != address(0)) {
+        address[2] storage slots = safeAddresses[msg.sender];
+        if (slots[0] != address(0) || slots[1] != address(0)) {
             revert SafeAddressAlreadySet();
         }
         if (_safe == msg.sender) {
             revert InvalidSafeAddress();
         }
 
-        safeAddress[msg.sender] = _safe;
+        slots[0] = _safe;
 
         emit SafeAddressSet(msg.sender, _safe);
     }
 
-    /// @notice Request a change to the registered safe address. Takes effect after 24 hours.
-    /// @dev Blocked during emergency lock. The 24-hour delay prevents an attacker with a
-    /// compromised key from immediately rerouting the safe address and draining via withdrawToSafe.
+    /// @notice Request to write a safe address into a slot. Takes effect after 24 hours.
+    /// @dev Writing to an empty slot 1 adds a backup; writing to a filled slot replaces it.
+    /// Blocked during emergency lock. The 24-hour delay prevents an attacker with a compromised
+    /// key from immediately rerouting a safe address and draining via withdrawToSafe.
     /// Only one pending change allowed at a time. Cannot be requested while a withdrawal is pending.
-    /// @param _newSafe The new trusted recovery address to request.
-    function requestSafeAddressChange(address _newSafe) external {
+    /// Slots can never be cleared: address(0) is never a valid new address.
+    /// @param slot The slot to write (0 = primary, 1 = backup). Slot 0 must already be set.
+    /// @param _newSafe The new trusted recovery address. Must not already be in either slot.
+    function requestSafeAddressChange(uint8 slot, address _newSafe) external {
         if (lockedUntil[msg.sender] > block.timestamp) {
             revert EmergencyLockOngoing();
+        }
+
+        if (slot > 1) {
+            revert InvalidSafeSlot();
         }
 
         if (_newSafe == address(0)) {
             revert InvalidSafeAddress();
         }
 
-        if (safeAddress[msg.sender] == address(0)) {
+        address[2] storage slots = safeAddresses[msg.sender];
+
+        if (slots[0] == address(0)) {
             revert SafeAddressNotSet();
         }
 
-        if (safeAddress[msg.sender] == _newSafe) {
+        if (slots[0] == _newSafe || slots[1] == _newSafe) {
             revert SafeAddressAlreadySet();
         }
 
@@ -373,7 +425,7 @@ contract Watcher is ReentrancyGuard {
             revert InvalidSafeAddress();
         }
 
-        if (pendingSafeAddress[msg.sender] != address(0)) {
+        if (pendingSafeChange[msg.sender].newSafe != address(0)) {
             revert PendingSafeChangeExists();
         }
 
@@ -381,14 +433,19 @@ contract Watcher is ReentrancyGuard {
             revert PendingWithdrawalExists();
         }
 
-        uint256 unlockTime = block.timestamp + SAFE_ADDRESS_CHANGE_DELAY;
+        uint64 unlockTime = uint64(block.timestamp + SAFE_ADDRESS_CHANGE_DELAY);
 
-        pendingSafeAddress[msg.sender] = _newSafe;
-        safeChangeUnlockTime[msg.sender] = unlockTime;
+        pendingSafeChange[msg.sender] = PendingSafeChange({
+            newSafe: _newSafe,
+            slot: slot,
+            unlockTime: unlockTime
+        });
 
         emit SafeAddressChangeRequested(
-            safeAddress[msg.sender],
+            msg.sender,
+            slots[slot],
             _newSafe,
+            slot,
             unlockTime
         );
     }
@@ -396,61 +453,73 @@ contract Watcher is ReentrancyGuard {
     /// @notice Confirm a pending safe address change after the delay has expired.
     /// @dev Blocked during emergency lock. An attacker cannot queue a change during lock,
     /// wait for the delay, and confirm it, both request and confirm are blocked while locked.
+    /// Writes the pending address into its requested slot.
     function confirmSafeAddressChange() external {
         if (lockedUntil[msg.sender] > block.timestamp) {
             revert EmergencyLockOngoing();
         }
 
-        address pending = pendingSafeAddress[msg.sender];
+        PendingSafeChange memory pending = pendingSafeChange[msg.sender];
 
-        if (pending == address(0)) {
+        if (pending.newSafe == address(0)) {
             revert NoPendingSafeChange();
         }
 
-        if (block.timestamp < safeChangeUnlockTime[msg.sender]) {
+        if (block.timestamp < pending.unlockTime) {
             revert SafeChangeDelayNotOver();
         }
 
-        safeAddress[msg.sender] = pending;
+        safeAddresses[msg.sender][pending.slot] = pending.newSafe;
 
-        delete pendingSafeAddress[msg.sender];
-        delete safeChangeUnlockTime[msg.sender];
+        delete pendingSafeChange[msg.sender];
 
-        emit SafeAddressChangeConfirmed(msg.sender, pending);
+        emit SafeAddressChangeConfirmed(
+            msg.sender,
+            pending.newSafe,
+            pending.slot
+        );
     }
 
-    /// @notice Cancel a pending safe address change. Restores the previous safe address.
+    /// @notice Cancel a pending safe address change. Both slots keep their current addresses.
     /// @dev Intentionally NOT blocked during emergency lock. Cancelling is always a safe action
     /// and the user may need to cancel a malicious pending change while the vault is locked.
     function cancelSafeAddressChange() external {
-        if (pendingSafeAddress[msg.sender] == address(0)) {
+        address cancelled = pendingSafeChange[msg.sender].newSafe;
+
+        if (cancelled == address(0)) {
             revert NoPendingSafeChange();
         }
 
-        delete pendingSafeAddress[msg.sender];
-        delete safeChangeUnlockTime[msg.sender];
+        delete pendingSafeChange[msg.sender];
 
-        emit SafeAddressChangeCancelled(msg.sender);
+        emit SafeAddressChangeCancelled(msg.sender, cancelled);
     }
 
-    /// @notice Send a specified amount from the vault balance to the registered safe address.
+    /// @notice Send a specified amount from the vault balance to one of the registered safe addresses.
     /// @dev Blocked during emergency lock. The lock is an absolute freeze — nothing leaves
     /// the vault while locked, including withdrawToSafe. This ensures the passive protection
     /// use case (locking for an extended period) cannot be bypassed via the safe address path.
-    /// Accepts a partial or full amount. Updates the withdrawal window with the percentage
-    /// sent relative to the balance at the time of the call. Cannot be called while a
+    /// Accepts a partial or full amount. Cannot be called while a
     /// pending withdrawal exists.
+    /// @param safe The destination. Must be non-zero and equal to one of the user's two safe slots.
     /// @param amount The amount of native token to send to the safe address.
-    function withdrawToSafe(uint256 amount) external nonReentrant {
+    function withdrawToSafe(
+        address safe,
+        uint256 amount
+    ) external nonReentrant {
         if (lockedUntil[msg.sender] > block.timestamp) {
             revert EmergencyLockOngoing();
         }
 
         if (amount == 0) revert AmountZero();
 
-        address safe = safeAddress[msg.sender];
         if (safe == address(0)) {
-            revert SafeAddressNotSet();
+            revert InvalidSafeAddress();
+        }
+
+        address[2] storage slots = safeAddresses[msg.sender];
+        if (safe != slots[0] && safe != slots[1]) {
+            revert SafeAddressNotRegistered();
         }
 
         if (pendingWithdraw[msg.sender].amount != 0) {
@@ -460,12 +529,6 @@ contract Watcher is ReentrancyGuard {
         uint256 userBalance = balances[msg.sender];
         if (amount > userBalance) revert InsufficientBalance(userBalance);
         balances[msg.sender] -= amount;
-
-        // if full balance, set window to 100
-        // if partial, calculate percent normally
-        uint256 percent = (amount * 100) / userBalance;
-        windowStartTime[msg.sender] = block.timestamp;
-        withdrawnInWindow[msg.sender] = percent;
 
         _sendEth(safe, amount);
         emit WithdrawToSafe(msg.sender, safe, amount);
@@ -492,8 +555,8 @@ contract Watcher is ReentrancyGuard {
     ) external view returns (uint256) {
         if (pendingWithdraw[user].amount > 0) return 0;
 
-        // If last withdrawal was a small probe, next withdrawal will be flagged regardless
-        if (lastWithdrawPercent[user] > 0 && lastWithdrawPercent[user] < 5) {
+        // If a probe was executed within PROBE_WINDOW, next withdrawal will be flagged regardless
+        if (_isProbeActive(user)) {
             return 0;
         }
 
@@ -568,9 +631,7 @@ contract Watcher is ReentrancyGuard {
         WithdrawalRequest memory req = pendingWithdraw[user];
         if (req.amount > 0) {
             instantLimit = 0;
-        } else if (
-            lastWithdrawPercent[user] > 0 && lastWithdrawPercent[user] < 5
-        ) {
+        } else if (_isProbeActive(user)) {
             instantLimit = 0; // Rule 2 — next withdrawal will be flagged regardless
         } else {
             instantLimit = (balance * 60) / 100; // Rule 1 threshold
@@ -591,23 +652,37 @@ contract Watcher is ReentrancyGuard {
         }
     }
 
-    /// @notice Returns the pending safe address change and remaining delay, or zero values if none exists.
+    /// @notice Returns both safe address slots (0 = primary, 1 = backup). Empty slots are address(0).
+    function getSafeAddresses(
+        address user
+    ) external view returns (address[2] memory) {
+        return safeAddresses[user];
+    }
+
+    /// @notice Returns the pending safe address change, its target slot and remaining delay,
+    /// or zero values if none exists.
     function getPendingSafeChange(
         address user
-    ) external view returns (address pendingSafe, uint256 remainingTime) {
-        pendingSafe = pendingSafeAddress[user];
+    )
+        external
+        view
+        returns (address newSafe, uint8 slot, uint256 remainingTime)
+    {
+        PendingSafeChange memory pending = pendingSafeChange[user];
 
-        if (pendingSafe == address(0)) {
-            return (address(0), 0);
+        if (pending.newSafe == address(0)) {
+            return (address(0), 0, 0);
         }
 
-        uint256 unlockTime = safeChangeUnlockTime[user];
-
-        if (block.timestamp >= unlockTime) {
-            return (pendingSafe, 0);
+        if (block.timestamp >= pending.unlockTime) {
+            return (pending.newSafe, pending.slot, 0);
         }
 
-        remainingTime = unlockTime - block.timestamp;
+        return (
+            pending.newSafe,
+            pending.slot,
+            pending.unlockTime - block.timestamp
+        );
     }
 
     /// @notice Returns the total ETH balance held by the contract across all users.
