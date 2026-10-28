@@ -10,7 +10,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  * by introducing behavioral risk detection on withdrawals. Suspicious or large withdrawals are
  * delayed instead of executed immediately, giving users a reaction window to cancel, lock the
  * vault, or route funds to a pre-registered safe address before any funds leaves the contract.
- * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold (>60%),
+ * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold (>60% by
+ * default, configurable per user between 10% and 100%; loosening takes 24 hours, tightening is instant),
  * test-probe pattern detection (<5% followed by any withdrawal within 72 hours), and cumulative 72-hour window
  * tracking (>30%). Each user's state is fully isolated. Emergency lock accepts a user-defined
  * duration (1h to 30 days) and can only be extended, never shortened. Safe address changes
@@ -37,6 +38,11 @@ contract Watcher is ReentrancyGuard {
     error LockNotExtended();
     error InvalidSafeSlot();
     error SafeAddressNotRegistered();
+    error ThresholdOutOfBounds();
+    error ThresholdUnchanged();
+    error PendingThresholdChangeExists();
+    error NoPendingThresholdChange();
+    error ThresholdChangeDelayNotOver();
 
     uint256 public constant DELAY = 12 hours;
     uint256 public constant MIN_LOCK_DURATION = 1 hours;
@@ -45,6 +51,10 @@ contract Watcher is ReentrancyGuard {
     uint256 public constant WINDOW_DURATION_FOR_MAX_WITHDRAW = 72 hours;
     uint256 public constant MAX_INSTANT_WITHDRAW_PERCENT = 30;
     uint256 public constant PROBE_WINDOW = 72 hours;
+    uint256 public constant DEFAULT_LARGE_WITHDRAW_PERCENT = 60;
+    uint256 public constant MIN_LARGE_WITHDRAW_PERCENT = 10;
+    uint256 public constant MAX_LARGE_WITHDRAW_PERCENT = 100;
+    uint256 public constant THRESHOLD_CHANGE_DELAY = 24 hours;
 
     mapping(address => uint256) public balances; //Tracks withdrawable funds
     mapping(address => WithdrawalRequest) public pendingWithdraw; // Pending withdrawals per user
@@ -54,6 +64,8 @@ contract Watcher is ReentrancyGuard {
     mapping(address => PendingSafeChange) public pendingSafeChange; // Pending safe address change, requires delay before execution.
     mapping(address => uint256) public withdrawnInWindow; // Tracks cumulative withdrawn % in current window for each user
     mapping(address => uint256) public windowStartTime; // Tracks start time of current window for cumulative withdrawal %
+    mapping(address => uint256) largeWithdrawPercent; // Rule 1 threshold per user, 0 = use DEFAULT_LARGE_WITHDRAW_PERCENT
+    mapping(address => PendingThresholdChange) public pendingThresholdChange; // Pending Rule 1 threshold raise, requires delay before execution.
 
     //Pending withdrawal structure, each user can only have ONE pending withdrawal.
     struct WithdrawalRequest {
@@ -66,6 +78,12 @@ contract Watcher is ReentrancyGuard {
     struct PendingSafeChange {
         address newSafe; // Address to write into the slot, address(0) = no pending change
         uint8 slot; // Target slot (0 or 1)
+        uint64 unlockTime; // When confirmation is allowed
+    }
+
+    //Pending Rule 1 threshold raise, each user can only have ONE pending change.
+    struct PendingThresholdChange {
+        uint8 newPercent; // Requested threshold, 0 = no pending change
         uint64 unlockTime; // When confirmation is allowed
     }
 
@@ -98,6 +116,16 @@ contract Watcher is ReentrancyGuard {
         address cancelledSafe
     );
     event WithdrawToSafe(address indexed user, address safe, uint256 amount);
+    event ThresholdChangeRequested(
+        address indexed user,
+        uint256 newPercent,
+        uint256 unlockTime
+    );
+    event ThresholdChangeApplied(address indexed user, uint256 newPercent);
+    event ThresholdChangeCancelled(
+        address indexed user,
+        uint256 cancelledPercent
+    );
 
     /// @notice Deposit native token into the vault.
     /// @dev Balance is tracked internally. Emits Deposited event.
@@ -230,7 +258,7 @@ contract Watcher is ReentrancyGuard {
     /// user's vault balance. This prevents an attacker who queued a withdrawal from executing it
     /// after the user locks — the funds are returned to the vault and the request is erased.
     /// Blocks withdraw, executeWithdraw, requestSafeAddressChange, confirmSafeAddressChange,
-    /// and withdrawToSafe while active.
+    /// withdrawToSafe, threshold raises and confirmThresholdChange while active.
     /// @param duration Lock duration in seconds. Must be between MIN_LOCK_DURATION and MAX_LOCK_DURATION.
     function emergencyLock(uint256 duration) external {
         if (duration < MIN_LOCK_DURATION) revert DurationTooShort();
@@ -259,7 +287,8 @@ contract Watcher is ReentrancyGuard {
 
     /// @notice Evaluates whether a withdrawal should be delayed based on behavioral risk rules.
     /// @dev Three independent rules are evaluated, any single match flags the withdrawal as risky.
-    /// Rule 1: amount exceeds 60% of current balance — defends against instant full-balance drain.
+    /// Rule 1: amount exceeds the user's large-withdrawal threshold (default 60%) of current balance —
+    /// defends against instant full-balance drain.
     /// Rule 2: a probe (<5% of balance) was executed within the last PROBE_WINDOW — defends against
     /// test-probe staged attack pattern.
     /// Rule 3: cumulative withdrawals in the last 72 hours exceed 30% — defends against slow drain.
@@ -272,8 +301,9 @@ contract Watcher is ReentrancyGuard {
         uint256 amount,
         uint256 balance
     ) internal view returns (bool) {
-        // RULE 1: amount > 60% of balance
-        bool largeWithdrawal = amount > (balance * 60) / 100;
+        // RULE 1: amount > threshold % of balance (cross-multiplied, no rounding)
+        bool largeWithdrawal = amount * 100 >
+            balance * _largeWithdrawPercent(user);
 
         // RULE 2: probe (< 5%) executed within the last PROBE_WINDOW
         bool suspiciousPattern = _isProbeActive(user);
@@ -295,6 +325,14 @@ contract Watcher is ReentrancyGuard {
         }
 
         return largeWithdrawal || suspiciousPattern || cumulativeExceeded;
+    }
+
+    /// @notice Returns the user's Rule 1 threshold, falling back to DEFAULT_LARGE_WITHDRAW_PERCENT if unset.
+    function _largeWithdrawPercent(
+        address user
+    ) internal view returns (uint256) {
+        uint256 percent = largeWithdrawPercent[user];
+        return percent == 0 ? DEFAULT_LARGE_WITHDRAW_PERCENT : percent;
     }
 
     /// @notice Returns true if the user's last executed withdrawal was a probe within PROBE_WINDOW.
@@ -536,6 +574,107 @@ contract Watcher is ReentrancyGuard {
 
     /*
     ============================================================
+                WITHDRAW THRESHOLD MANAGEMENT
+    ============================================================
+    */
+
+    /// @notice Request a change to the Rule 1 large-withdrawal threshold.
+    /// @dev Stricter (lower) values apply instantly, clear any pending raise and are allowed during
+    /// emergency lock, since tightening can only add protection. Looser (higher) values require a
+    /// 24-hour delay so an attacker with a compromised key cannot instantly raise the threshold and
+    /// drain in one withdrawal. Raises are blocked during emergency lock and while another change is
+    /// pending.
+    /// @param newPercent The new threshold. Must be between MIN_LARGE_WITHDRAW_PERCENT and
+    /// MAX_LARGE_WITHDRAW_PERCENT and differ from the current threshold.
+    function requestThresholdChange(uint256 newPercent) external {
+        if (
+            newPercent < MIN_LARGE_WITHDRAW_PERCENT ||
+            newPercent > MAX_LARGE_WITHDRAW_PERCENT
+        ) {
+            revert ThresholdOutOfBounds();
+        }
+
+        uint256 current = _largeWithdrawPercent(msg.sender);
+        if (newPercent == current) {
+            revert ThresholdUnchanged();
+        }
+
+        // Stricter: apply instantly and drop any pending raise
+        if (newPercent < current) {
+            uint256 pendingPercent = pendingThresholdChange[msg.sender]
+                .newPercent;
+            if (pendingPercent != 0) {
+                delete pendingThresholdChange[msg.sender];
+                emit ThresholdChangeCancelled(msg.sender, pendingPercent);
+            }
+
+            largeWithdrawPercent[msg.sender] = newPercent;
+
+            emit ThresholdChangeApplied(msg.sender, newPercent);
+            return;
+        }
+
+        // Looser: queue behind THRESHOLD_CHANGE_DELAY
+        if (lockedUntil[msg.sender] > block.timestamp) {
+            revert EmergencyLockOngoing();
+        }
+
+        if (pendingThresholdChange[msg.sender].newPercent != 0) {
+            revert PendingThresholdChangeExists();
+        }
+
+        uint64 unlockTime = uint64(block.timestamp + THRESHOLD_CHANGE_DELAY);
+
+        pendingThresholdChange[msg.sender] = PendingThresholdChange({
+            newPercent: uint8(newPercent),
+            unlockTime: unlockTime
+        });
+
+        emit ThresholdChangeRequested(msg.sender, newPercent, unlockTime);
+    }
+
+    /// @notice Confirm a pending threshold raise after the delay has expired.
+    /// @dev Blocked during emergency lock, mirroring confirmSafeAddressChange.
+    function confirmThresholdChange() external {
+        if (lockedUntil[msg.sender] > block.timestamp) {
+            revert EmergencyLockOngoing();
+        }
+
+        PendingThresholdChange memory pending = pendingThresholdChange[
+            msg.sender
+        ];
+
+        if (pending.newPercent == 0) {
+            revert NoPendingThresholdChange();
+        }
+
+        if (block.timestamp < pending.unlockTime) {
+            revert ThresholdChangeDelayNotOver();
+        }
+
+        largeWithdrawPercent[msg.sender] = pending.newPercent;
+
+        delete pendingThresholdChange[msg.sender];
+
+        emit ThresholdChangeApplied(msg.sender, pending.newPercent);
+    }
+
+    /// @notice Cancel a pending threshold raise. The current threshold is unchanged.
+    /// @dev Intentionally NOT blocked during emergency lock. Cancelling is always a safe action.
+    function cancelThresholdChange() external {
+        uint256 cancelled = pendingThresholdChange[msg.sender].newPercent;
+
+        if (cancelled == 0) {
+            revert NoPendingThresholdChange();
+        }
+
+        delete pendingThresholdChange[msg.sender];
+
+        emit ThresholdChangeCancelled(msg.sender, cancelled);
+    }
+
+    /*
+    ============================================================
                     VIEW HELPERS
     ============================================================
     */
@@ -560,7 +699,7 @@ contract Watcher is ReentrancyGuard {
             return 0;
         }
 
-        return (balances[user] * 60) / 100; // Rule 1 threshold
+        return (balances[user] * _largeWithdrawPercent(user)) / 100; // Rule 1 threshold
     }
 
     /// @notice Returns the amount, unlock time, and request time of the user's pending withdrawal.
@@ -634,7 +773,7 @@ contract Watcher is ReentrancyGuard {
         } else if (_isProbeActive(user)) {
             instantLimit = 0; // Rule 2 — next withdrawal will be flagged regardless
         } else {
-            instantLimit = (balance * 60) / 100; // Rule 1 threshold
+            instantLimit = (balance * _largeWithdrawPercent(user)) / 100; // Rule 1 threshold
         }
 
         hasPending = req.amount > 0;
@@ -683,6 +822,31 @@ contract Watcher is ReentrancyGuard {
             pending.slot,
             pending.unlockTime - block.timestamp
         );
+    }
+
+    /// @notice Returns the user's Rule 1 threshold, any pending raise and its remaining delay.
+    /// @return currentPercent The threshold currently applied (default if never changed).
+    /// @return pendingPercent The pending raise, or 0 if none.
+    /// @return remainingTime Seconds until the pending raise can be confirmed, or 0 if ready or none.
+    function getThresholdState(
+        address user
+    )
+        external
+        view
+        returns (
+            uint256 currentPercent,
+            uint256 pendingPercent,
+            uint256 remainingTime
+        )
+    {
+        currentPercent = _largeWithdrawPercent(user);
+
+        PendingThresholdChange memory pending = pendingThresholdChange[user];
+        pendingPercent = pending.newPercent;
+
+        if (pendingPercent != 0 && block.timestamp < pending.unlockTime) {
+            remainingTime = pending.unlockTime - block.timestamp;
+        }
     }
 
     /// @notice Returns the total ETH balance held by the contract across all users.
