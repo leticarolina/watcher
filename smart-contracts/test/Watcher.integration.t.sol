@@ -70,7 +70,7 @@ contract WatcherIntegrationTest is Test {
 
         // Large drain is now pending, NOT executed
         assertTrue(vault.hasPendingWithdraw(user));
-        (uint256 pendingAmount, , ) = vault.getPendingWithdraw(user);
+        (uint256 pendingAmount,,) = vault.getPendingWithdraw(user);
         assertEq(pendingAmount, 3 ether);
 
         // Funds are deducted from balance but sitting in pending — not sent yet
@@ -147,7 +147,7 @@ contract WatcherIntegrationTest is Test {
         vault.requestSafeAddressChange(0, attackerWallet);
 
         // Change is pending — not yet active
-        (address pendingSafe, , ) = vault.getPendingSafeChange(user);
+        (address pendingSafe,,) = vault.getPendingSafeChange(user);
         assertEq(pendingSafe, attackerWallet);
         assertEq(vault.getSafeAddresses(user)[0], safeWallet); // still original
 
@@ -158,7 +158,7 @@ contract WatcherIntegrationTest is Test {
         vault.cancelSafeAddressChange();
 
         // Pending change cleared, safe address unchanged
-        (address pendingSafeAfter, , ) = vault.getPendingSafeChange(user);
+        (address pendingSafeAfter,,) = vault.getPendingSafeChange(user);
         assertEq(pendingSafeAfter, address(0));
         assertEq(vault.getSafeAddresses(user)[0], safeWallet);
 
@@ -234,7 +234,7 @@ contract WatcherIntegrationTest is Test {
 
         // Safe address still unchanged, no pending change
         assertEq(vault.getSafeAddresses(user)[0], safeWallet);
-        (address pendingSafe, , ) = vault.getPendingSafeChange(user);
+        (address pendingSafe,,) = vault.getPendingSafeChange(user);
         assertEq(pendingSafe, address(0));
 
         // --- USER EXTENDS LOCK FOR EXTRA SAFETY ---

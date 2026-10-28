@@ -32,7 +32,7 @@ contract WatcherProbeTest is Test {
         assertEq(vault.lastProbeTime(user), block.timestamp);
         assertEq(vault.getInstantWithdrawLimit(user), 0);
 
-        (, uint256 instantLimit, , , , , ) = vault.getUserState(user);
+        (, uint256 instantLimit,,,,,) = vault.getUserState(user);
         assertEq(instantLimit, 0);
 
         // 1 ETH (~10%) would pass Rules 1 and 3, so only Rule 2 can flag it
@@ -53,10 +53,7 @@ contract WatcherProbeTest is Test {
         assertEq(vault.getInstantWithdrawLimit(user), 0);
 
         vm.warp(probeTime + vault.PROBE_WINDOW() + 1);
-        assertEq(
-            vault.getInstantWithdrawLimit(user),
-            (vault.balances(user) * 60) / 100
-        );
+        assertEq(vault.getInstantWithdrawLimit(user), (vault.balances(user) * 60) / 100);
 
         vm.prank(user);
         vault.withdraw(1 ether);

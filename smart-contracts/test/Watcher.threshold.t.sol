@@ -34,11 +34,7 @@ contract WatcherThresholdTest is Test {
         vault.confirmThresholdChange();
     }
 
-    function _assertState(
-        uint256 current,
-        uint256 pending,
-        uint256 remaining
-    ) internal view {
+    function _assertState(uint256 current, uint256 pending, uint256 remaining) internal view {
         (uint256 c, uint256 p, uint256 r) = vault.getThresholdState(user);
         assertEq(c, current, "currentPercent");
         assertEq(p, pending, "pendingPercent");
@@ -67,10 +63,7 @@ contract WatcherThresholdTest is Test {
 
     // Fresh user: no probe, no window, so only Rule 1 applies. The new cross-multiplied check
     // must match the old `amount > (balance * 60) / 100` for every input.
-    function testFuzz_default_matchesOldRule1(
-        uint256 balance,
-        uint256 amount
-    ) public {
+    function testFuzz_default_matchesOldRule1(uint256 balance, uint256 amount) public {
         balance = bound(balance, 1, 1_000_000 ether);
         amount = bound(amount, 1, balance);
 
@@ -138,11 +131,7 @@ contract WatcherThresholdTest is Test {
     function test_raise_isDelayed() public {
         vm.prank(user);
         vm.expectEmit(true, false, false, true);
-        emit Watcher.ThresholdChangeRequested(
-            user,
-            80,
-            block.timestamp + 24 hours
-        );
+        emit Watcher.ThresholdChangeRequested(user, 80, block.timestamp + 24 hours);
         vault.requestThresholdChange(80);
 
         _assertState(60, 80, 24 hours);
@@ -332,20 +321,20 @@ contract WatcherThresholdTest is Test {
 
     function test_instantLimit_reflectsThreshold() public {
         assertEq(vault.getInstantWithdrawLimit(user), 6 ether);
-        (, uint256 limit, , , , , ) = vault.getUserState(user);
+        (, uint256 limit,,,,,) = vault.getUserState(user);
         assertEq(limit, 6 ether);
 
         vm.prank(user);
         vault.requestThresholdChange(25);
 
         assertEq(vault.getInstantWithdrawLimit(user), 2.5 ether);
-        (, limit, , , , , ) = vault.getUserState(user);
+        (, limit,,,,,) = vault.getUserState(user);
         assertEq(limit, 2.5 ether);
 
         _raiseTo(100);
 
         assertEq(vault.getInstantWithdrawLimit(user), 10 ether);
-        (, limit, , , , , ) = vault.getUserState(user);
+        (, limit,,,,,) = vault.getUserState(user);
         assertEq(limit, 10 ether);
     }
 

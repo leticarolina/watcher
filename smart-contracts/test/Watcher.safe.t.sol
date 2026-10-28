@@ -43,17 +43,10 @@ contract WatcherSafeSlotsTest is Test {
     function test_addBackup_toSlot1() public {
         vm.prank(user);
         vm.expectEmit(true, true, true, true);
-        emit Watcher.SafeAddressChangeRequested(
-            user,
-            address(0),
-            backup,
-            1,
-            block.timestamp + 24 hours
-        );
+        emit Watcher.SafeAddressChangeRequested(user, address(0), backup, 1, block.timestamp + 24 hours);
         vault.requestSafeAddressChange(1, backup);
 
-        (address pendingSafe, uint8 slot, uint256 remaining) = vault
-            .getPendingSafeChange(user);
+        (address pendingSafe, uint8 slot, uint256 remaining) = vault.getPendingSafeChange(user);
         assertEq(pendingSafe, backup);
         assertEq(slot, 1);
         assertEq(remaining, 24 hours);
@@ -116,9 +109,7 @@ contract WatcherSafeSlotsTest is Test {
         vault.requestSafeAddressChange(0, backup);
     }
 
-    function test_requestSafeAddressChange_rejectsInvalidSlotAndAddress()
-        public
-    {
+    function test_requestSafeAddressChange_rejectsInvalidSlotAndAddress() public {
         vm.startPrank(user);
 
         vm.expectRevert(Watcher.InvalidSafeSlot.selector);
@@ -203,8 +194,7 @@ contract WatcherSafeSlotsTest is Test {
         emit Watcher.SafeAddressChangeCancelled(user, backup);
         vault.cancelSafeAddressChange();
 
-        (address pendingSafe, uint8 slot, uint256 remaining) = vault
-            .getPendingSafeChange(user);
+        (address pendingSafe, uint8 slot, uint256 remaining) = vault.getPendingSafeChange(user);
         assertEq(pendingSafe, address(0));
         assertEq(slot, 0);
         assertEq(remaining, 0);
