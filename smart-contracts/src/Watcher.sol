@@ -9,11 +9,10 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  * @notice Watcher is a self-custody security vault that protects users from instant fund drainage
  * by introducing behavioral risk detection on withdrawals. Suspicious or large withdrawals are
  * delayed instead of executed immediately, giving users a reaction window to cancel, lock the
- * vault, or route funds to a pre-registered safe address before any funds leaves the contract.
- * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold (>60% by
- * default, configurable per user between 10% and 100%; loosening takes 24 hours, tightening is instant),
- * test-probe pattern detection (<5% followed by any withdrawal within 72 hours), and cumulative 72-hour window
- * tracking (>30%, tracked in WAD so rounding never under-counts). Each user's state is fully isolated. Emergency lock accepts a user-defined
+ * vault, or route funds to a pre-registered safe address before any funds leaves.
+ * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold, configurable per user between 10% and 100%;
+ * loosening takes 24 hours, tightening is instant ,test-probe pattern detection (<5% followed by any withdrawal within 72 hours),
+ * and cumulative 72-hour window tracking (>30%). Each user's state is fully isolated. Emergency lock accepts a user-defined
  * duration (1h to 30 days) and can only be extended, never shortened. Safe address changes
  * require a 24-hour delay and are blocked during emergency lock.
  */
@@ -272,8 +271,8 @@ contract Watcher is ReentrancyGuard {
         // RULE 2: probe (< 5%) executed within the last PROBE_WINDOW
         bool suspiciousPattern = _isProbeActive(user);
 
-        // RULE 3: cumulative withdrawals in last 72h > 30% of balance
-        // (used + amount / balance > cap, cross-multiplied so the current amount is not rounded)
+        // RULE 3: flag if (already used in the 72h window + this withdrawal's share) > 30%.
+        // Written as multiplication instead of division so nothing gets rounded.
         (bool windowActive, uint256 used) = _windowUsage(user);
         bool cumulativeExceeded = windowActive && used * balance + amount * WAD > MAX_INSTANT_WITHDRAW_WAD * balance;
 

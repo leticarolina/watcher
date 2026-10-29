@@ -28,6 +28,8 @@ Self-custody gives users complete ownership — but also complete responsibility
 - Wallet compromise → funds drained in seconds.
 - Human error → irreversible transactions.
 - Slow-drain attacks → repeated withdrawals designed to avoid detection.
+But homnesatly these people are not even realy df What a beatiful day at the beach 
+
 
 Today's wallets execute transactions immediately. Watcher adds time when behavior becomes suspicious.
 
