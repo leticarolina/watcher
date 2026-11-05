@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Watcher} from "../src/Watcher.sol";
+import {MockERC20} from "./Watcher.t.sol";
 
 /**
  * @title Watcher configurable Rule 1 threshold tests
@@ -11,17 +12,28 @@ import {Watcher} from "../src/Watcher.sol";
  */
 contract WatcherThresholdTest is Test {
     Watcher vault;
+    MockERC20 mockToken;
 
     address user = makeAddr("user");
 
     uint256 constant INITIAL_BALANCE = 100 ether;
 
     function setUp() public {
-        vault = new Watcher();
-        vm.deal(user, INITIAL_BALANCE);
+        mockToken = new MockERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mockToken);
+        vault = new Watcher(tokens);
+        _fund(user, INITIAL_BALANCE);
 
         vm.prank(user);
-        vault.deposit{value: 10 ether}();
+        vault.deposit(address(mockToken), 10 ether);
+    }
+
+    // Replaces vm.deal: mints tokens and pre-approves the vault so deposits work inside startPrank
+    function _fund(address account, uint256 amount) internal {
+        mockToken.mint(account, amount);
+        vm.prank(account);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     function _raiseTo(uint256 percent) internal {
@@ -51,14 +63,14 @@ contract WatcherThresholdTest is Test {
 
     function test_default_boundaryAt60Percent() public {
         vm.prank(user);
-        vault.withdraw(6 ether); // exactly 60% — not > 60%
-        assertFalse(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), 6 ether); // exactly 60% — not > 60%
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     function test_default_justAbove60PercentIsFlagged() public {
         vm.prank(user);
-        vault.withdraw(6 ether + 1); // 1 wei over 60%
-        assertTrue(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), 6 ether + 1); // 1 wei over 60%
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     // Fresh user: no probe, no window, so only Rule 1 applies. The new cross-multiplied check
@@ -68,15 +80,15 @@ contract WatcherThresholdTest is Test {
         amount = bound(amount, 1, balance);
 
         address fresh = makeAddr("fresh");
-        vm.deal(fresh, balance);
+        _fund(fresh, balance);
 
         vm.startPrank(fresh);
-        vault.deposit{value: balance}();
-        vault.withdraw(amount);
+        vault.deposit(address(mockToken), balance);
+        vault.withdraw(address(mockToken), amount);
         vm.stopPrank();
 
         bool oldRule1 = amount > (balance * 60) / 100;
-        assertEq(vault.hasPendingWithdraw(fresh), oldRule1);
+        assertEq(vault.hasPendingWithdraw(fresh, address(mockToken)), oldRule1);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -92,8 +104,8 @@ contract WatcherThresholdTest is Test {
         _assertState(40, 0, 0);
 
         vm.prank(user);
-        vault.withdraw(5 ether); // 50% > 40%
-        assertTrue(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), 5 ether); // 50% > 40%
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     function test_lower_allowedDuringEmergencyLock() public {
@@ -138,8 +150,8 @@ contract WatcherThresholdTest is Test {
 
         // Still on 60% until confirmed
         vm.prank(user);
-        vault.withdraw(7 ether);
-        assertTrue(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), 7 ether);
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     function test_raise_blockedDuringEmergencyLock() public {
@@ -205,8 +217,8 @@ contract WatcherThresholdTest is Test {
         _assertState(80, 0, 0);
 
         vm.prank(user);
-        vault.withdraw(7 ether); // 70% <= 80%
-        assertFalse(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), 7 ether); // 70% <= 80%
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     function test_confirm_blockedDuringEmergencyLock() public {
@@ -312,29 +324,29 @@ contract WatcherThresholdTest is Test {
         _raiseTo(100);
 
         vm.prank(user);
-        vault.withdraw(10 ether);
+        vault.withdraw(address(mockToken), 10 ether);
 
-        assertFalse(vault.hasPendingWithdraw(user));
-        assertEq(vault.balances(user), 0);
-        assertEq(user.balance, INITIAL_BALANCE);
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
+        assertEq(vault.balances(user, address(mockToken)), 0);
+        assertEq(mockToken.balanceOf(user), INITIAL_BALANCE);
     }
 
     function test_instantLimit_reflectsThreshold() public {
-        assertEq(vault.getInstantWithdrawLimit(user), 6 ether);
-        (, uint256 limit,,,,,) = vault.getUserState(user);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 6 ether);
+        (, uint256 limit,,,,,) = vault.getUserState(user, address(mockToken));
         assertEq(limit, 6 ether);
 
         vm.prank(user);
         vault.requestThresholdChange(25);
 
-        assertEq(vault.getInstantWithdrawLimit(user), 2.5 ether);
-        (, limit,,,,,) = vault.getUserState(user);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 2.5 ether);
+        (, limit,,,,,) = vault.getUserState(user, address(mockToken));
         assertEq(limit, 2.5 ether);
 
         _raiseTo(100);
 
-        assertEq(vault.getInstantWithdrawLimit(user), 10 ether);
-        (, limit,,,,,) = vault.getUserState(user);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 10 ether);
+        (, limit,,,,,) = vault.getUserState(user, address(mockToken));
         assertEq(limit, 10 ether);
     }
 
@@ -342,10 +354,10 @@ contract WatcherThresholdTest is Test {
         vm.prank(user);
         vault.requestThresholdChange(35);
 
-        uint256 limit = vault.getInstantWithdrawLimit(user);
+        uint256 limit = vault.getInstantWithdrawLimit(user, address(mockToken));
 
         vm.prank(user);
-        vault.withdraw(limit);
-        assertFalse(vault.hasPendingWithdraw(user));
+        vault.withdraw(address(mockToken), limit);
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 }

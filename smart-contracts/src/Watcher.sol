@@ -2,22 +2,32 @@
 pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title Watcher
  * @author Leticia Azevedo (@letiweb3)
- * @notice Watcher is a self-custody security vault that protects users from instant fund drainage
+ * @notice Watcher is a self-custody security protocol that protects instant fund drainage
  * by introducing behavioral risk detection on withdrawals. Suspicious or large withdrawals are
- * delayed instead of executed immediately, giving users a reaction window to cancel, lock the
- * vault, or route funds to a pre-registered safe address before any funds leaves.
- * @dev Withdrawals are evaluated against three behavioral rules: large withdrawal threshold, configurable per user between 10% and 100%;
- * loosening takes 24 hours, tightening is instant ,test-probe pattern detection (<5% followed by any withdrawal within 72 hours),
- * and cumulative 72-hour window tracking (>30%). Each user's state is fully isolated. Emergency lock accepts a user-defined
- * duration (1h to 30 days) and can only be extended, never shortened. Safe address changes
- * require a 24-hour delay and are blocked during emergency lock.
+ * delayed instead of executed immediately, giving users a reaction window to cancel, lock or
+ * route funds to a pre-registered safe address before any funds leaves.
+ * @dev Withdrawals are evaluated against three behavioral rules, any single match delays the withdrawal:
+ * RULE 1 (large withdrawal): amount exceeds the user’s configurable threshold (10–100%, default 60%);
+ * tightening applies instantly, loosening requires a 24-hour delay.
+ * RULE 2 (probe detection): a small withdrawal (<5% of balance) was executed within the last 72 hours,
+ * flagging a test-probe staged attack pattern.
+ * RULE 3 (cumulative window): total withdrawals in the last 72 hours exceed 30% of balance,
+ * defending against slow drain across multiple transactions.
+ * Each user’s state is isolated. Emergency lock accepts a user-defined duration (1h to 30 days),
+ * can only be extended never shortened, and blocks all outflows while active.
+ * Safe address changes require a 24-hour delay and are blocked during emergency lock.
  */
 
-contract Watcher is ReentrancyGuard {
+contract Watcher is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
+
     error AmountZero();
     error InsufficientBalance(uint256 balance);
     error PendingWithdrawExists();
@@ -31,7 +41,6 @@ contract Watcher is ReentrancyGuard {
     error NoPendingSafeChange();
     error SafeChangeDelayNotOver();
     error PendingWithdrawalExists();
-    error TransferFailed();
     error DurationTooShort();
     error DurationTooLong();
     error LockNotExtended();
@@ -42,57 +51,70 @@ contract Watcher is ReentrancyGuard {
     error PendingThresholdChangeExists();
     error NoPendingThresholdChange();
     error ThresholdChangeDelayNotOver();
+    error TokenNotAllowed();
+    error TokenAlreadyAllowed();
+    error UseWETH();
 
-    uint256 public constant DELAY = 12 hours;
-    uint256 public constant MIN_LOCK_DURATION = 1 hours;
-    uint256 public constant MAX_LOCK_DURATION = 30 days;
-    uint256 public constant SAFE_ADDRESS_CHANGE_DELAY = 24 hours;
-    uint256 public constant WINDOW_DURATION_FOR_MAX_WITHDRAW = 72 hours;
-    uint256 public constant MAX_INSTANT_WITHDRAW_PERCENT = 30;
-    uint256 public constant WAD = 1e18; // Fixed-point unit for window shares, 1e18 = 100% of balance
-    uint256 public constant MAX_INSTANT_WITHDRAW_WAD = (MAX_INSTANT_WITHDRAW_PERCENT * WAD) / 100;
-    uint256 public constant PROBE_WINDOW = 72 hours;
+    // Rule 1 — large withdrawal threshold
+    uint256 public constant RISKY_WITHDRAWAL_DELAY = 12 hours;
     uint256 public constant DEFAULT_LARGE_WITHDRAW_PERCENT = 60;
     uint256 public constant MIN_LARGE_WITHDRAW_PERCENT = 10;
     uint256 public constant MAX_LARGE_WITHDRAW_PERCENT = 100;
     uint256 public constant THRESHOLD_CHANGE_DELAY = 24 hours;
 
-    mapping(address => uint256) public balances; //Tracks withdrawable funds
-    mapping(address => WithdrawalRequest) public pendingWithdraw; // Pending withdrawals per user
-    mapping(address => uint256) public lastProbeTime; // Timestamp of last executed probe withdrawal (<5%), 0 = no probe
+    // Rule 2 — probe detection
+    uint256 public constant PROBE_DETECTION_WINDOW = 72 hours;
+
+    // Rule 3 — cumulative window
+    uint256 public constant CUMULATIVE_WITHDRAW_WINDOW_DURATION = 72 hours;
+    uint256 public constant MAX_CUMULATIVE_WITHDRAW_PERCENT = 30;
+    uint256 public constant WAD = 1e18;
+    uint256 public constant MAX_CUMULATIVE_WITHDRAW_WAD = (MAX_CUMULATIVE_WITHDRAW_PERCENT * WAD) / 100;
+
+    uint256 public constant MIN_LOCK_DURATION = 1 hours;
+    uint256 public constant MAX_LOCK_DURATION = 30 days;
+    uint256 public constant SAFE_ADDRESS_CHANGE_DELAY = 24 hours;
+
+    mapping(address => mapping(address => uint256)) public balances; // user => token => withdrawable funds
+    mapping(address => mapping(address => WithdrawalRequest)) public pendingWithdraw; // Pending withdrawals per user per token
+    mapping(address => mapping(address => uint256)) public lastProbeTime; // Per token: timestamp of last executed probe withdrawal (<5%), 0 = no probe
     mapping(address => uint256 endTimeout) public lockedUntil; // Tracks until when withdrawal is locked for that user
     mapping(address => address[2]) public safeAddresses; // Two trusted recovery slots per user: 0 = primary, 1 = backup.
     mapping(address => PendingSafeChange) public pendingSafeChange; // Pending safe address change, requires delay before execution.
-    mapping(address => uint256) withdrawnInWindow; // Cumulative withdrawn share in current window (WAD, 1e18 = 100%), read via getWindowState
-    mapping(address => uint256) windowStartTime; // Start time of current window, 0 = never used, read via getWindowState
+    mapping(address => mapping(address => uint256)) withdrawnInWindow; // Per token: cumulative withdrawn share in current window (WAD, 1e18 = 100%), read via getWindowState
+    mapping(address => mapping(address => uint256)) windowStartTime; // Per token: start time of current window, 0 = never used, read via getWindowState
     mapping(address => uint256) largeWithdrawPercent; // Rule 1 threshold per user, 0 = use DEFAULT_LARGE_WITHDRAW_PERCENT
     mapping(address => PendingThresholdChange) public pendingThresholdChange; // Pending Rule 1 threshold raise, requires delay before execution.
+    mapping(address => bool) public allowedTokens; // ERC-20 tokens accepted by the vault
+    address[] internal tokenList; // All allowed tokens, iterated to clear per-token pending withdrawals
 
     //Pending withdrawal structure, each user can only have ONE pending withdrawal.
     struct WithdrawalRequest {
         uint256 amount;
-        uint256 unlockTime; // When execution allowed
-        uint256 requestTime; // Timestamp created
+        uint256 unlockTime;
+        uint256 requestTime;
     }
 
     //Pending safe address change, each user can only have ONE pending change.
     struct PendingSafeChange {
         address newSafe; // Address to write into the slot, address(0) = no pending change
         uint8 slot; // Target slot (0 or 1)
-        uint64 unlockTime; // When confirmation is allowed
+        uint64 unlockTime;
     }
 
     //Pending Rule 1 threshold raise, each user can only have ONE pending change.
     struct PendingThresholdChange {
         uint8 newPercent; // Requested threshold, 0 = no pending change
-        uint64 unlockTime; // When confirmation is allowed
+        uint64 unlockTime;
     }
 
     //EVENTS
-    event Deposited(address indexed user, uint256 amount);
-    event WithdrawalRequested(address indexed user, uint256 amount, uint256 unlockTime, uint256 requestTime);
-    event WithdrawalExecuted(address indexed user, uint256 amount);
-    event WithdrawalCancelled(address indexed user, uint256 amount);
+    event Deposited(address indexed user, address indexed token, uint256 amount);
+    event WithdrawalRequested(
+        address indexed user, address indexed token, uint256 amount, uint256 unlockTime, uint256 requestTime
+    );
+    event WithdrawalExecuted(address indexed user, address indexed token, uint256 amount);
+    event WithdrawalCancelled(address indexed user, address indexed token, uint256 amount);
     event EmergencyLockActivated(address indexed user, uint256 lockedUntil);
     event SafeAddressSet(address indexed user, address safe);
     event SafeAddressChangeRequested(
@@ -100,34 +122,53 @@ contract Watcher is ReentrancyGuard {
     );
     event SafeAddressChangeConfirmed(address indexed user, address newSafe, uint8 slot);
     event SafeAddressChangeCancelled(address indexed user, address cancelledSafe);
-    event WithdrawToSafe(address indexed user, address safe, uint256 amount);
+    event WithdrawToSafe(address indexed user, address indexed token, address safe, uint256 amount);
     event ThresholdChangeRequested(address indexed user, uint256 newPercent, uint256 unlockTime);
     event ThresholdChangeApplied(address indexed user, uint256 newPercent);
     event ThresholdChangeCancelled(address indexed user, uint256 cancelledPercent);
 
-    /// @notice Deposit native token into the vault.
-    /// @dev Balance is tracked internally. Emits Deposited event.
-    function deposit() external payable {
-        if (msg.value == 0) {
-            revert AmountZero();
+    /// @param initialTokens ERC-20 tokens accepted from deployment.
+    constructor(address[] memory initialTokens) Ownable(msg.sender) {
+        for (uint256 i = 0; i < initialTokens.length; i++) {
+            allowedTokens[initialTokens[i]] = true;
+            tokenList.push(initialTokens[i]);
         }
+    }
 
-        balances[msg.sender] += msg.value;
+    /// @notice Allow a new ERC-20 token in the vault. Tokens cannot be removed once added.
+    function addToken(address token) external onlyOwner {
+        if (token == address(0)) revert TokenNotAllowed();
+        if (allowedTokens[token]) revert TokenAlreadyAllowed();
+        allowedTokens[token] = true;
+        tokenList.push(token);
+    }
 
-        emit Deposited(msg.sender, msg.value);
+    /// @notice Deposit an allowed ERC-20 token into the vault.
+    /// @dev Balance is tracked internally per token. Emits Deposited event.
+    function deposit(address token, uint256 amount) external nonReentrant {
+        if (!allowedTokens[token]) revert TokenNotAllowed();
+        if (amount == 0) revert AmountZero();
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        balances[msg.sender][token] += amount;
+        emit Deposited(msg.sender, token, amount);
     }
 
     receive() external payable {
-        balances[msg.sender] += msg.value;
+        revert UseWETH();
+    }
 
-        emit Deposited(msg.sender, msg.value);
+    fallback() external payable {
+        revert UseWETH();
     }
 
     /// @notice Attempt a withdrawal. Executes instantly if safe, enters pending queue if risky.
     /// @dev Risk is evaluated by _isRisky before any state changes. Balance is deducted immediately
     /// regardless of outcome to prevent double-spend.
-    /// @param amount The amount of native token to withdraw.
-    function withdraw(uint256 amount) external nonReentrant {
+    /// @param token The token to withdraw.
+    /// @param amount The amount of token to withdraw.
+    function withdraw(address token, uint256 amount) external nonReentrant {
+        if (!allowedTokens[token]) revert TokenNotAllowed();
+
         if (amount == 0) {
             revert AmountZero();
         }
@@ -137,7 +178,7 @@ contract Watcher is ReentrancyGuard {
             revert EmergencyLockOngoing();
         }
 
-        uint256 userBalance = balances[msg.sender];
+        uint256 userBalance = balances[msg.sender][token];
 
         // Ensure user has enough funds
         if (userBalance < amount) {
@@ -145,38 +186,39 @@ contract Watcher is ReentrancyGuard {
         }
 
         // Only ONE pending withdrawal allowed
-        if (pendingWithdraw[msg.sender].amount != 0) {
+        if (pendingWithdraw[msg.sender][token].amount != 0) {
             revert PendingWithdrawExists();
         }
 
-        bool risky = _isRisky(msg.sender, amount, userBalance); //Determine whether withdrawal is risky
-        balances[msg.sender] -= amount; // Deduct balance immediately
+        bool risky = _isRisky(msg.sender, token, amount, userBalance); //Determine whether withdrawal is risky
+        balances[msg.sender][token] -= amount; // Deduct balance immediately
 
         //if risky - create a pending request
         if (risky) {
-            uint256 unlockTime = block.timestamp + DELAY;
+            uint256 unlockTime = block.timestamp + RISKY_WITHDRAWAL_DELAY;
 
-            pendingWithdraw[msg.sender] =
+            pendingWithdraw[msg.sender][token] =
                 WithdrawalRequest({amount: amount, unlockTime: unlockTime, requestTime: block.timestamp});
 
-            emit WithdrawalRequested(msg.sender, amount, unlockTime, block.timestamp);
+            emit WithdrawalRequested(msg.sender, token, amount, unlockTime, block.timestamp);
 
             return;
         }
 
         // Send funds immediately if not risky and update withdrawal window tracking
-        _updateWithdrawWindow(msg.sender, amount, userBalance);
-        _recordProbe(msg.sender, amount, userBalance);
-        _sendEth(msg.sender, amount);
+        _updateWithdrawWindow(msg.sender, token, amount, userBalance);
+        _recordProbe(msg.sender, token, amount, userBalance);
+        _sendToken(token, msg.sender, amount);
 
-        emit WithdrawalExecuted(msg.sender, amount);
+        emit WithdrawalExecuted(msg.sender, token, amount);
     }
 
     /// @notice Execute a pending withdrawal after the delay has expired.
     /// @dev Blocked during emergency lock even if the pending request was created before the lock.
     /// This prevents an attacker who queued a withdrawal from executing it after the user locks.
-    function executeWithdraw() external nonReentrant {
-        WithdrawalRequest storage req = pendingWithdraw[msg.sender];
+    /// @param token The token of the pending withdrawal.
+    function executeWithdraw(address token) external nonReentrant {
+        WithdrawalRequest storage req = pendingWithdraw[msg.sender][token];
         uint256 executeAmount = req.amount;
 
         if (executeAmount == 0) {
@@ -190,33 +232,34 @@ contract Watcher is ReentrancyGuard {
             revert EmergencyLockOngoing();
         }
 
-        delete pendingWithdraw[msg.sender];
+        delete pendingWithdraw[msg.sender][token];
 
-        uint256 balanceBeforeRequest = balances[msg.sender] + executeAmount;
-        _updateWithdrawWindow(msg.sender, executeAmount, balanceBeforeRequest);
-        _recordProbe(msg.sender, executeAmount, balanceBeforeRequest);
-        _sendEth(msg.sender, executeAmount);
+        uint256 balanceBeforeRequest = balances[msg.sender][token] + executeAmount;
+        _updateWithdrawWindow(msg.sender, token, executeAmount, balanceBeforeRequest);
+        _recordProbe(msg.sender, token, executeAmount, balanceBeforeRequest);
+        _sendToken(token, msg.sender, executeAmount);
 
-        emit WithdrawalExecuted(msg.sender, executeAmount);
+        emit WithdrawalExecuted(msg.sender, token, executeAmount);
     }
 
     /// @notice Cancel a pending withdrawal and restore funds to the vault balance.
     /// @dev intentionally does NOT touch lastProbeTime. It is only written when funds actually leave
     /// the vault, so an attacker cannot erase their probe history by cancelling a flagged withdrawal.
     /// Cancellation is permitted during emergency lock.
-    function cancelWithdraw() external {
-        WithdrawalRequest storage req = pendingWithdraw[msg.sender];
+    /// @param token The token of the pending withdrawal.
+    function cancelWithdraw(address token) external {
+        WithdrawalRequest storage req = pendingWithdraw[msg.sender][token];
         uint256 amount = req.amount;
 
         if (amount == 0) {
             revert NoPendingWithdraw();
         }
 
-        balances[msg.sender] += amount;
+        balances[msg.sender][token] += amount;
 
-        delete pendingWithdraw[msg.sender];
+        delete pendingWithdraw[msg.sender][token];
 
-        emit WithdrawalCancelled(msg.sender, amount);
+        emit WithdrawalCancelled(msg.sender, token, amount);
     }
 
     /// @notice Activate emergency lock for a user-defined duration.
@@ -236,12 +279,15 @@ contract Watcher is ReentrancyGuard {
         if (unlockTime < lockedUntil[msg.sender]) revert LockNotExtended();
         lockedUntil[msg.sender] = unlockTime;
 
-        // Auto-cancel any pending withdrawal on lock
-        uint256 pending = pendingWithdraw[msg.sender].amount;
-        if (pending != 0) {
-            balances[msg.sender] += pending;
-            delete pendingWithdraw[msg.sender];
-            emit WithdrawalCancelled(msg.sender, pending);
+        // Auto-cancel any pending withdrawal on lock, across every allowed token
+        for (uint256 i = 0; i < tokenList.length; i++) {
+            address token = tokenList[i];
+            uint256 pending = pendingWithdraw[msg.sender][token].amount;
+            if (pending != 0) {
+                balances[msg.sender][token] += pending;
+                delete pendingWithdraw[msg.sender][token];
+                emit WithdrawalCancelled(msg.sender, token, pending);
+            }
         }
 
         emit EmergencyLockActivated(msg.sender, unlockTime);
@@ -257,24 +303,25 @@ contract Watcher is ReentrancyGuard {
     /// @dev Three independent rules are evaluated, any single match flags the withdrawal as risky.
     /// Rule 1: amount exceeds the user's large-withdrawal threshold (default 60%) of current balance —
     /// defends against instant full-balance drain.
-    /// Rule 2: a probe (<5% of balance) was executed within the last PROBE_WINDOW — defends against
+    /// Rule 2: a probe (<5% of balance) was executed within the last PROBE_DETECTION_WINDOW — defends against
     /// test-probe staged attack pattern.
     /// Rule 3: cumulative withdrawals in the last 72 hours exceed 30% — defends against slow drain.
     /// @param user The address being evaluated.
+    /// @param token The token being withdrawn.
     /// @param amount The withdrawal amount being requested.
-    /// @param balance The user's current vault balance before deduction.
+    /// @param balance The user's current vault balance of token before deduction.
     /// @return bool True if the withdrawal should be delayed, false if it can execute instantly.
-    function _isRisky(address user, uint256 amount, uint256 balance) internal view returns (bool) {
+    function _isRisky(address user, address token, uint256 amount, uint256 balance) internal view returns (bool) {
         // RULE 1: amount > threshold % of balance (cross-multiplied, no rounding)
         bool largeWithdrawal = amount * 100 > balance * _largeWithdrawPercent(user);
 
-        // RULE 2: probe (< 5%) executed within the last PROBE_WINDOW
-        bool suspiciousPattern = _isProbeActive(user);
+        // RULE 2: probe (< 5%) executed within the last PROBE_DETECTION_WINDOW
+        bool suspiciousPattern = _isProbeActive(user, token);
 
         // RULE 3: flag if (already used in the 72h window + this withdrawal's share) > 30%.
         // Written as multiplication instead of division so nothing gets rounded.
-        (bool windowActive, uint256 used) = _windowUsage(user);
-        bool cumulativeExceeded = windowActive && used * balance + amount * WAD > MAX_INSTANT_WITHDRAW_WAD * balance;
+        (bool windowActive, uint256 used) = _windowUsage(user, token);
+        bool cumulativeExceeded = windowActive && used * balance + amount * WAD > MAX_CUMULATIVE_WITHDRAW_WAD * balance;
 
         return largeWithdrawal || suspiciousPattern || cumulativeExceeded;
     }
@@ -285,37 +332,37 @@ contract Watcher is ReentrancyGuard {
         return percent == 0 ? DEFAULT_LARGE_WITHDRAW_PERCENT : percent;
     }
 
-    /// @notice Returns true if the user's last executed withdrawal was a probe within PROBE_WINDOW.
-    function _isProbeActive(address user) internal view returns (bool) {
-        uint256 probeTime = lastProbeTime[user];
-        return probeTime != 0 && block.timestamp <= probeTime + PROBE_WINDOW;
+    /// @notice Returns true if the user's last executed withdrawal was a probe within PROBE_DETECTION_WINDOW.
+    function _isProbeActive(address user, address token) internal view returns (bool) {
+        uint256 probeTime = lastProbeTime[user][token];
+        return probeTime != 0 && block.timestamp <= probeTime + PROBE_DETECTION_WINDOW;
     }
 
     /// @notice Returns whether the user's Rule 3 window is active and the share used in it.
     /// @dev An expired or never-started window reports (false, 0) even though storage still holds
     /// the old values; storage is only reset by the next executed withdrawal.
-    /// @return active True if a window started within the last WINDOW_DURATION_FOR_MAX_WITHDRAW.
+    /// @return active True if a window started within the last CUMULATIVE_WITHDRAW_WINDOW_DURATION.
     /// @return used Cumulative withdrawn share in the window (WAD), 0 if not active.
-    function _windowUsage(address user) internal view returns (bool active, uint256 used) {
-        uint256 start = windowStartTime[user];
-        active = start != 0 && block.timestamp <= start + WINDOW_DURATION_FOR_MAX_WITHDRAW;
-        if (active) used = withdrawnInWindow[user];
+    function _windowUsage(address user, address token) internal view returns (bool active, uint256 used) {
+        uint256 start = windowStartTime[user][token];
+        active = start != 0 && block.timestamp <= start + CUMULATIVE_WITHDRAW_WINDOW_DURATION;
+        if (active) used = withdrawnInWindow[user][token];
     }
 
     /// @notice Returns the largest amount the user can withdraw right now without being delayed.
     /// @dev Mirrors _isRisky: 0 if a withdrawal is pending or a probe is active (Rule 2), otherwise
     /// the smaller of the Rule 1 threshold and the share left in an active Rule 3 window.
-    function _instantLimit(address user) internal view returns (uint256) {
-        if (pendingWithdraw[user].amount > 0) return 0;
-        if (_isProbeActive(user)) return 0; // Rule 2 — next withdrawal will be flagged regardless
+    function _instantLimit(address user, address token) internal view returns (uint256) {
+        if (pendingWithdraw[user][token].amount > 0) return 0;
+        if (_isProbeActive(user, token)) return 0; // Rule 2 — next withdrawal will be flagged regardless
 
-        uint256 balance = balances[user];
+        uint256 balance = balances[user][token];
         uint256 limit = (balance * _largeWithdrawPercent(user)) / 100; // Rule 1 threshold
 
-        (bool windowActive, uint256 used) = _windowUsage(user);
+        (bool windowActive, uint256 used) = _windowUsage(user, token);
         if (windowActive) {
             uint256 windowLimit =
-                used >= MAX_INSTANT_WITHDRAW_WAD ? 0 : ((MAX_INSTANT_WITHDRAW_WAD - used) * balance) / WAD; // Rule 3 remaining
+                used >= MAX_CUMULATIVE_WITHDRAW_WAD ? 0 : ((MAX_CUMULATIVE_WITHDRAW_WAD - used) * balance) / WAD; // Rule 3 remaining
             if (windowLimit < limit) limit = windowLimit;
         }
 
@@ -327,20 +374,20 @@ contract Watcher is ReentrancyGuard {
     /// pending withdrawal cannot erase a probe. Comparison avoids division so tiny amounts are not
     /// rounded down to 0%.
     /// @param user The address whose probe state is being updated.
+    /// @param token The token withdrawn.
     /// @param amount The executed withdrawal amount.
     /// @param balance The user's vault balance before the withdrawal was deducted.
-    function _recordProbe(address user, uint256 amount, uint256 balance) internal {
-        lastProbeTime[user] = amount * 10_000 < balance * 500 ? block.timestamp : 0;
+    function _recordProbe(address user, address token, uint256 amount, uint256 balance) internal {
+        lastProbeTime[user][token] = amount * 10_000 < balance * 500 ? block.timestamp : 0;
     }
 
-    /// @notice Sends ETH to a recipient address using a low-level call.
+    /// @notice Sends ERC-20 tokens to a recipient address using SafeERC20.
     /// @dev Balance state is always updated before this function is called.
+    /// @param token The token to send.
     /// @param to The recipient address.
-    /// @param amount The amount of ETH to send in wei.
-    function _sendEth(address to, uint256 amount) internal {
-        (bool success,) = to.call{value: amount}("");
-
-        if (!success) revert TransferFailed();
+    /// @param amount The amount of token to send.
+    function _sendToken(address token, address to, uint256 amount) internal {
+        IERC20(token).safeTransfer(to, amount);
     }
 
     /// @notice Tracks the cumulative withdrawn share within the current 72-hour window.
@@ -350,30 +397,39 @@ contract Watcher is ReentrancyGuard {
     /// dilute future withdrawal shares since they are calculated against the new larger balance.
     /// Shares are stored in WAD and rounded up, so rounding can never let a withdrawal under-count.
     /// @param user The address whose window is being updated.
+    /// @param token The token withdrawn.
     /// @param amount The executed withdrawal amount.
     /// @param balance The user's vault balance before the withdrawal was deducted.
-    function _updateWithdrawWindow(address user, uint256 amount, uint256 balance) internal {
+    function _updateWithdrawWindow(address user, address token, uint256 amount, uint256 balance) internal {
         uint256 share = (amount * WAD + balance - 1) / balance; // ceil(amount / balance) in WAD
-        uint256 start = windowStartTime[user];
+        uint256 start = windowStartTime[user][token];
 
         // Initialize window if first use
         if (start == 0) {
-            windowStartTime[user] = block.timestamp;
-            withdrawnInWindow[user] = share;
+            windowStartTime[user][token] = block.timestamp;
+            withdrawnInWindow[user][token] = share;
             return;
         }
 
         // Reset window if 72 hours have passed since start
-        if (block.timestamp > start + WINDOW_DURATION_FOR_MAX_WITHDRAW) {
-            windowStartTime[user] = block.timestamp;
+        if (block.timestamp > start + CUMULATIVE_WITHDRAW_WINDOW_DURATION) {
+            windowStartTime[user][token] = block.timestamp;
 
-            withdrawnInWindow[user] = share;
+            withdrawnInWindow[user][token] = share;
 
             return;
         }
 
         // Otherwise accumulate share in current window
-        withdrawnInWindow[user] += share;
+        withdrawnInWindow[user][token] += share;
+    }
+
+    /// @notice Returns true if the user has a pending withdrawal in any allowed token.
+    function _hasAnyPendingWithdraw(address user) internal view returns (bool) {
+        for (uint256 i = 0; i < tokenList.length; i++) {
+            if (pendingWithdraw[user][tokenList[i]].amount != 0) return true;
+        }
+        return false;
     }
 
     /*
@@ -445,7 +501,7 @@ contract Watcher is ReentrancyGuard {
             revert PendingSafeChangeExists();
         }
 
-        if (pendingWithdraw[msg.sender].amount != 0) {
+        if (_hasAnyPendingWithdraw(msg.sender)) {
             revert PendingWithdrawalExists();
         }
 
@@ -503,9 +559,12 @@ contract Watcher is ReentrancyGuard {
     /// use case (locking for an extended period) cannot be bypassed via the safe address path.
     /// Accepts a partial or full amount. Cannot be called while a
     /// pending withdrawal exists.
+    /// @param token The token to send.
     /// @param safe The destination. Must be non-zero and equal to one of the user's two safe slots.
-    /// @param amount The amount of native token to send to the safe address.
-    function withdrawToSafe(address safe, uint256 amount) external nonReentrant {
+    /// @param amount The amount of token to send to the safe address.
+    function withdrawToSafe(address token, address safe, uint256 amount) external nonReentrant {
+        if (!allowedTokens[token]) revert TokenNotAllowed();
+
         if (lockedUntil[msg.sender] > block.timestamp) {
             revert EmergencyLockOngoing();
         }
@@ -521,16 +580,16 @@ contract Watcher is ReentrancyGuard {
             revert SafeAddressNotRegistered();
         }
 
-        if (pendingWithdraw[msg.sender].amount != 0) {
+        if (pendingWithdraw[msg.sender][token].amount != 0) {
             revert PendingWithdrawalExists();
         }
 
-        uint256 userBalance = balances[msg.sender];
+        uint256 userBalance = balances[msg.sender][token];
         if (amount > userBalance) revert InsufficientBalance(userBalance);
-        balances[msg.sender] -= amount;
+        balances[msg.sender][token] -= amount;
 
-        _sendEth(safe, amount);
-        emit WithdrawToSafe(msg.sender, safe, amount);
+        _sendToken(token, safe, amount);
+        emit WithdrawToSafe(msg.sender, token, safe, amount);
     }
 
     /*
@@ -632,50 +691,50 @@ contract Watcher is ReentrancyGuard {
     ============================================================
     */
     /// @notice Returns the vault balance for a given user.
-    function getUserVaultBalance(address user) external view returns (uint256) {
-        return balances[user];
+    function getUserVaultBalance(address user, address token) external view returns (uint256) {
+        return balances[user][token];
     }
 
     /// @notice Returns true if the user has an active pending withdrawal.
-    function hasPendingWithdraw(address user) external view returns (bool) {
-        return pendingWithdraw[user].amount > 0;
+    function hasPendingWithdraw(address user, address token) external view returns (bool) {
+        return pendingWithdraw[user][token].amount > 0;
     }
 
     /// @notice Returns the maximum amount the user can withdraw instantly without triggering a delay.
-    function getInstantWithdrawLimit(address user) external view returns (uint256) {
-        return _instantLimit(user);
+    function getInstantWithdrawLimit(address user, address token) external view returns (uint256) {
+        return _instantLimit(user, token);
     }
 
     /// @notice Returns the user's Rule 3 cumulative window state with expiry applied.
     /// @dev Shares are WAD-scaled (1e18 = 100% of balance). An expired or never-started window
-    /// returns (0, MAX_INSTANT_WITHDRAW_WAD, 0, 0): the next executed withdrawal starts a new window.
+    /// returns (0, MAX_CUMULATIVE_WITHDRAW_WAD, 0, 0): the next executed withdrawal starts a new window.
     /// @return used Share withdrawn in the active window.
     /// @return remaining Share still allowed before Rule 3 flags a withdrawal (0 if exhausted).
     /// @return windowStart Timestamp the active window started, 0 if none.
     /// @return resetsIn Seconds until the active window expires and stops counting, 0 if none.
-    function getWindowState(address user)
+    function getWindowState(address user, address token)
         external
         view
         returns (uint256 used, uint256 remaining, uint256 windowStart, uint256 resetsIn)
     {
         bool active;
-        (active, used) = _windowUsage(user);
-        remaining = used >= MAX_INSTANT_WITHDRAW_WAD ? 0 : MAX_INSTANT_WITHDRAW_WAD - used;
+        (active, used) = _windowUsage(user, token);
+        remaining = used >= MAX_CUMULATIVE_WITHDRAW_WAD ? 0 : MAX_CUMULATIVE_WITHDRAW_WAD - used;
 
         if (active) {
-            windowStart = windowStartTime[user];
+            windowStart = windowStartTime[user][token];
             // Window is active while block.timestamp <= start + duration
-            resetsIn = windowStart + WINDOW_DURATION_FOR_MAX_WITHDRAW + 1 - block.timestamp;
+            resetsIn = windowStart + CUMULATIVE_WITHDRAW_WINDOW_DURATION + 1 - block.timestamp;
         }
     }
 
     /// @notice Returns the amount, unlock time, and request time of the user's pending withdrawal.
-    function getPendingWithdraw(address user)
+    function getPendingWithdraw(address user, address token)
         external
         view
         returns (uint256 amount, uint256 unlockTime, uint256 requestTime)
     {
-        WithdrawalRequest memory req = pendingWithdraw[user];
+        WithdrawalRequest memory req = pendingWithdraw[user][token];
 
         return (req.amount, req.unlockTime, req.requestTime);
     }
@@ -697,8 +756,8 @@ contract Watcher is ReentrancyGuard {
     }
 
     /// @notice Returns the remaining delay in seconds before the pending withdrawal can be executed, or zero if ready.
-    function getRemainingPendingTime(address user) external view returns (uint256) {
-        WithdrawalRequest memory req = pendingWithdraw[user];
+    function getRemainingPendingTime(address user, address token) external view returns (uint256) {
+        WithdrawalRequest memory req = pendingWithdraw[user][token];
 
         if (req.amount == 0) {
             return 0;
@@ -712,7 +771,7 @@ contract Watcher is ReentrancyGuard {
     }
 
     /// @notice Returns a full snapshot of the user's vault state in a single call.
-    function getUserState(address user)
+    function getUserState(address user, address token)
         external
         view
         returns (
@@ -725,9 +784,9 @@ contract Watcher is ReentrancyGuard {
             uint256 remainingLockTime
         )
     {
-        balance = balances[user];
-        WithdrawalRequest memory req = pendingWithdraw[user];
-        instantLimit = _instantLimit(user);
+        balance = balances[user][token];
+        WithdrawalRequest memory req = pendingWithdraw[user][token];
+        instantLimit = _instantLimit(user, token);
 
         hasPending = req.amount > 0;
 
@@ -786,10 +845,5 @@ contract Watcher is ReentrancyGuard {
         if (pendingPercent != 0 && block.timestamp < pending.unlockTime) {
             remainingTime = pending.unlockTime - block.timestamp;
         }
-    }
-
-    /// @notice Returns the total ETH balance held by the contract across all users.
-    function totalBalance() external view returns (uint256) {
-        return address(this).balance;
     }
 }

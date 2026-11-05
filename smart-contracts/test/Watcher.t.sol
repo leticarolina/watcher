@@ -3,6 +3,18 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Watcher} from "../src/Watcher.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract MockERC20 is ERC20 {
+    constructor() ERC20("Mock", "MCK") {
+        _mint(msg.sender, 1_000_000e18);
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
 
 /**
  * @title Watcher Test Suite
@@ -16,6 +28,7 @@ import {Watcher} from "../src/Watcher.sol";
  */
 contract WatcherTest is Test {
     Watcher vault;
+    MockERC20 mockToken;
 
     address leti = address(1);
     address shai = address(2);
@@ -24,17 +37,27 @@ contract WatcherTest is Test {
     uint256 constant INITIAL_BALANCE = 10 ether;
 
     function setUp() public {
-        vault = new Watcher();
+        mockToken = new MockERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mockToken);
+        vault = new Watcher(tokens);
 
         // Fund test users
-        vm.deal(leti, INITIAL_BALANCE);
-        vm.deal(shai, INITIAL_BALANCE);
-        vm.deal(eve, INITIAL_BALANCE);
+        _fund(leti, INITIAL_BALANCE);
+        _fund(shai, INITIAL_BALANCE);
+        _fund(eve, INITIAL_BALANCE);
+    }
+
+    // Replaces vm.deal: mints tokens and pre-approves the vault so deposits work inside startPrank
+    function _fund(address account, uint256 amount) internal {
+        mockToken.mint(account, amount);
+        vm.prank(account);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     modifier deposited(address user, uint256 amount) {
         vm.prank(user);
-        vault.deposit{value: amount}();
+        vault.deposit(address(mockToken), amount);
         _;
     }
 
@@ -42,9 +65,9 @@ contract WatcherTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(leti);
-        vault.deposit{value: amount}();
+        vault.deposit(address(mockToken), amount);
 
-        uint256 balance = vault.balances(leti);
+        uint256 balance = vault.balances(leti, address(mockToken));
 
         assertEq(balance, amount);
     }
@@ -52,9 +75,9 @@ contract WatcherTest is Test {
     function test_deposit_zeroAmount() public {
         vm.prank(leti);
         vm.expectRevert(Watcher.AmountZero.selector);
-        vault.deposit();
+        vault.deposit(address(mockToken), 0);
 
-        uint256 balance = vault.balances(leti);
+        uint256 balance = vault.balances(leti, address(mockToken));
 
         assertEq(balance, 0);
     }
@@ -69,32 +92,32 @@ contract WatcherTest is Test {
         uint256 firstWithdraw = 0.1 ether; // 10%
         uint256 secondWithdraw = 0.1 ether; // 10%
 
-        uint256 beforeBalance = leti.balance;
+        uint256 beforeBalance = mockToken.balanceOf(leti);
 
         vm.startPrank(leti);
-        vault.withdraw(firstWithdraw);
+        vault.withdraw(address(mockToken), firstWithdraw);
         // small withdrawals should not trigger pending
-        vault.withdraw(secondWithdraw);
+        vault.withdraw(address(mockToken), secondWithdraw);
         vm.stopPrank();
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertFalse(hasPending);
         // ETH received
-        assertEq(leti.balance, beforeBalance + secondWithdraw + firstWithdraw);
+        assertEq(mockToken.balanceOf(leti), beforeBalance + secondWithdraw + firstWithdraw);
     }
 
     function test_withdraw_largeAmountPending() public deposited(leti, 1 ether) {
         uint256 withdrawAmount = 0.8 ether; // 80%
-        uint256 currentBalance = vault.balances(leti);
+        uint256 currentBalance = vault.balances(leti, address(mockToken));
 
         vm.prank(leti);
-        vault.withdraw(withdrawAmount);
+        vault.withdraw(address(mockToken), withdrawAmount);
 
-        assertEq(vault.balances(leti), currentBalance - withdrawAmount);
+        assertEq(vault.balances(leti, address(mockToken)), currentBalance - withdrawAmount);
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertTrue(hasPending);
-        (uint256 amount, uint256 unlockTime, uint256 requestTime) = vault.getPendingWithdraw(leti);
+        (uint256 amount, uint256 unlockTime, uint256 requestTime) = vault.getPendingWithdraw(leti, address(mockToken));
         assertTrue(hasPending);
         assertEq(amount, withdrawAmount);
         assertGt(unlockTime, requestTime);
@@ -105,24 +128,24 @@ contract WatcherTest is Test {
 
         vm.expectRevert(Watcher.AmountZero.selector);
 
-        vault.withdraw(0);
+        vault.withdraw(address(mockToken), 0);
     }
 
     function test_withdraw_insufficientBalanceReverts() public deposited(leti, 1 ether) {
         vm.prank(leti);
 
         vm.expectRevert(abi.encodeWithSelector(Watcher.InsufficientBalance.selector, 1 ether));
-        vault.withdraw(2 ether);
+        vault.withdraw(address(mockToken), 2 ether);
     }
 
     function test_withdraw_whenPendingExistsReverts() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
         vm.expectRevert(Watcher.PendingWithdrawExists.selector);
 
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.stopPrank();
     }
@@ -137,16 +160,16 @@ contract WatcherTest is Test {
         uint256 withdrawAmount = 0.8 ether;
 
         vm.startPrank(leti);
-        vault.withdraw(withdrawAmount);
-        assertEq(vault.balances(leti), 1 ether - withdrawAmount);
-        vault.cancelWithdraw();
+        vault.withdraw(address(mockToken), withdrawAmount);
+        assertEq(vault.balances(leti, address(mockToken)), 1 ether - withdrawAmount);
+        vault.cancelWithdraw(address(mockToken));
         vm.stopPrank();
 
-        uint256 balance = vault.balances(leti);
+        uint256 balance = vault.balances(leti, address(mockToken));
 
         assertEq(balance, 1 ether);
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
         assertFalse(hasPending);
     }
@@ -156,25 +179,25 @@ contract WatcherTest is Test {
 
         vm.expectRevert(Watcher.NoPendingWithdraw.selector);
 
-        vault.cancelWithdraw();
+        vault.cancelWithdraw(address(mockToken));
     }
 
     function test_cancelWithdraw_whileLocked() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
         vault.emergencyLock(1 hours); // now auto-cancels the pending withdrawal
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
         assertFalse(hasPending);
 
         // Nothing left to cancel manually — emergencyLock already did it
         vm.expectRevert(Watcher.NoPendingWithdraw.selector);
-        vault.cancelWithdraw();
+        vault.cancelWithdraw(address(mockToken));
 
         vm.stopPrank();
     }
@@ -189,17 +212,17 @@ contract WatcherTest is Test {
         uint256 withdrawAmount = 0.8 ether;
 
         vm.startPrank(leti);
-        vault.withdraw(withdrawAmount);
+        vault.withdraw(address(mockToken), withdrawAmount);
         // Warp forward 1 hour
         vm.warp(block.timestamp + 12 hours);
 
-        uint256 beforeBalance = leti.balance;
+        uint256 beforeBalance = mockToken.balanceOf(leti);
 
-        vault.executeWithdraw();
+        vault.executeWithdraw(address(mockToken));
 
         vm.stopPrank();
 
-        assertEq(leti.balance, beforeBalance + withdrawAmount);
+        assertEq(mockToken.balanceOf(leti), beforeBalance + withdrawAmount);
     }
 
     function test_executeWithdraw_reverts_beforeDelay() public deposited(leti, 1 ether) {
@@ -207,11 +230,11 @@ contract WatcherTest is Test {
 
         vm.startPrank(leti);
 
-        vault.withdraw(withdrawAmount);
+        vault.withdraw(address(mockToken), withdrawAmount);
 
         vm.expectRevert(Watcher.TimeoutNotOver.selector);
 
-        vault.executeWithdraw();
+        vault.executeWithdraw(address(mockToken));
 
         vm.stopPrank();
     }
@@ -221,27 +244,7 @@ contract WatcherTest is Test {
 
         vm.expectRevert(Watcher.NoPendingWithdraw.selector);
 
-        vault.executeWithdraw();
-    }
-
-    function test_executeWithdraw_reducesContractBalance() public {
-        vm.startPrank(leti);
-
-        vault.deposit{value: 1 ether}();
-
-        vault.withdraw(0.8 ether);
-
-        vm.warp(block.timestamp + 13 hours);
-
-        uint256 before = vault.totalBalance();
-
-        vault.executeWithdraw();
-
-        uint256 afterBalance = vault.totalBalance();
-
-        vm.stopPrank();
-
-        assertEq(before - afterBalance, 0.8 ether);
+        vault.executeWithdraw(address(mockToken));
     }
 
     // Execute pending withdrawal, then immediately try to withdraw again
@@ -249,19 +252,19 @@ contract WatcherTest is Test {
     function test_executeWithdraw_thenWithdrawAgain_windowAccumulates() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
         vm.warp(block.timestamp + 12 hours);
 
         // Execute — withdrawnInWindow should now have 80% accumulated
-        vault.executeWithdraw();
+        vault.executeWithdraw(address(mockToken));
 
         // Try to withdraw again, any amount tips window over 30%
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.stopPrank();
 
         // Rule 3 triggers — pending created
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertTrue(hasPending);
     }
 
@@ -278,18 +281,18 @@ contract WatcherTest is Test {
 
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
 
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.warp(block.timestamp + 23 hours); //move forward but still within lock duration
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.warp(block.timestamp + 2 hours); //move forward past lock duration
-        vault.withdraw(0.1 ether); // should work now
+        vault.withdraw(address(mockToken), 0.1 ether); // should work now
 
         vm.stopPrank();
 
-        assertEq(vault.balances(leti), 1 ether - 0.1 ether);
+        assertEq(vault.balances(leti, address(mockToken)), 1 ether - 0.1 ether);
     }
 
     function test_emergencyLock_resetsTimer() public deposited(leti, 1 ether) {
@@ -338,11 +341,11 @@ contract WatcherTest is Test {
         assertFalse(vault.isVaultLocked(leti));
 
         // Withdraw should work
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.stopPrank();
 
-        assertFalse(vault.hasPendingWithdraw(leti));
+        assertFalse(vault.hasPendingWithdraw(leti, address(mockToken)));
     }
 
     // Extend lock while NOT currently locked (lockedUntil is 0 or past)
@@ -377,7 +380,7 @@ contract WatcherTest is Test {
 
         // One second below minimum should revert
         vm.startPrank(shai);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.expectRevert(Watcher.DurationTooShort.selector);
         vault.emergencyLock(1 hours - 10 seconds);
@@ -397,7 +400,7 @@ contract WatcherTest is Test {
 
         // One second above maximum should revert
         vm.startPrank(shai);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.expectRevert(Watcher.DurationTooLong.selector);
         vault.emergencyLock(30 days + 1 seconds);
@@ -414,41 +417,41 @@ contract WatcherTest is Test {
         assertFalse(vault.isVaultLocked(shai)); // shai unaffected
 
         // Shai can still withdraw normally
-        uint256 shaiBefore = shai.balance;
+        uint256 shaiBefore = mockToken.balanceOf(shai);
         vm.prank(shai);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
-        assertEq(shai.balance, shaiBefore + 0.1 ether);
-        assertFalse(vault.hasPendingWithdraw(shai));
+        assertEq(mockToken.balanceOf(shai), shaiBefore + 0.1 ether);
+        assertFalse(vault.hasPendingWithdraw(shai, address(mockToken)));
 
         // Leti is still blocked
         vm.prank(leti);
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
     }
 
     function test_cancelWithdraw_StillWorksWhileLocked() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
         vault.emergencyLock(24 hours); // now auto-cancels the pending withdrawal
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
         assertFalse(hasPending);
 
         // Nothing left to cancel manually — emergencyLock already did it
         vm.expectRevert(Watcher.NoPendingWithdraw.selector);
-        vault.cancelWithdraw();
+        vault.cancelWithdraw(address(mockToken));
 
         vm.stopPrank();
     }
 
     function test_withdraw_afterLockExpires() public deposited(leti, 1 ether) {
-        uint256 eveBeforeBalance = eve.balance;
+        uint256 eveBeforeBalance = mockToken.balanceOf(eve);
         vm.startPrank(leti);
         vault.setSafeAddress(eve);
         vault.emergencyLock(24 hours);
@@ -456,15 +459,15 @@ contract WatcherTest is Test {
         // Warp 24 hours
         vm.warp(block.timestamp + 24 hours);
 
-        vault.withdraw(0.1 ether);
-        vault.withdrawToSafe(eve, 0.9 ether); // full remaining balance, should work without pending
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), eve, 0.9 ether); // full remaining balance, should work without pending
 
         vm.stopPrank();
 
-        uint256 eveAfterBlance = eve.balance;
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        uint256 eveAfterBlance = mockToken.balanceOf(eve);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertFalse(hasPending);
-        assertEq(vault.balances(leti), 0 ether);
+        assertEq(vault.balances(leti, address(mockToken)), 0 ether);
         assertEq(eveAfterBlance, eveBeforeBalance + 0.9 ether);
     }
 
@@ -474,13 +477,13 @@ contract WatcherTest is Test {
         vault.setSafeAddress(shai);
         vault.emergencyLock(24 hours);
 
-        uint256 safeBalanceBefore = shai.balance;
+        uint256 safeBalanceBefore = mockToken.balanceOf(shai);
 
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdrawToSafe(shai, 1 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 1 ether);
         vm.stopPrank();
 
-        uint256 safeBalanceAfter = shai.balance;
+        uint256 safeBalanceAfter = mockToken.balanceOf(shai);
 
         assertEq(safeBalanceAfter, safeBalanceBefore);
     }
@@ -496,32 +499,32 @@ contract WatcherTest is Test {
         vm.startPrank(leti);
 
         // Small withdraw (<5%)
-        vault.withdraw(0.04 ether);
+        vault.withdraw(address(mockToken), 0.04 ether);
 
         // any withdraw
-        vault.withdraw(0.5 ether);
+        vault.withdraw(address(mockToken), 0.5 ether);
 
         vm.stopPrank();
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
         assertTrue(hasPending);
     }
 
-    // Probe flag expires after PROBE_WINDOW
+    // Probe flag expires after PROBE_DETECTION_WINDOW
     // User does small withdraw, waits 72h, does large withdraw — should NOT trigger Rule 2
     function test_suspiciousPattern_expires_afterProbeWindow() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.04 ether); // Small withdraw (<5%)
+        vault.withdraw(address(mockToken), 0.04 ether); // Small withdraw (<5%)
 
-        vm.warp(block.timestamp + 73 hours); // Past PROBE_WINDOW, probe no longer active
+        vm.warp(block.timestamp + 73 hours); // Past PROBE_DETECTION_WINDOW, probe no longer active
 
-        vault.withdraw(0.45 ether);
+        vault.withdraw(address(mockToken), 0.45 ether);
 
         vm.stopPrank();
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertFalse(hasPending);
     }
 
@@ -529,14 +532,14 @@ contract WatcherTest is Test {
     function test_suspiciousPattern_boundary_5percent() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.05 ether); // exactly 5% — NOT < 5, so Rule 2 won't flag next withdraw
+        vault.withdraw(address(mockToken), 0.05 ether); // exactly 5% — NOT < 5, so Rule 2 won't flag next withdraw
 
-        vault.withdraw(0.45 ether); // rule 3 triggers because >40%, but Rule 2 does NOT trigger because lastPercent is not < 5
+        vault.withdraw(address(mockToken), 0.45 ether); // rule 3 triggers because >40%, but Rule 2 does NOT trigger because lastPercent is not < 5
 
         vm.stopPrank();
 
         // Rule 2 should NOT trigger because lastPercent == 5, not < 5
-        assertTrue(vault.hasPendingWithdraw(leti));
+        assertTrue(vault.hasPendingWithdraw(leti, address(mockToken)));
     }
 
     /*
@@ -547,12 +550,12 @@ contract WatcherTest is Test {
     function test_cumulativeWithdraw_triggersDelay() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.1 ether);
-        vault.withdraw(0.1 ether);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.expectRevert(Watcher.PendingWithdrawExists.selector);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
         vm.stopPrank();
     }
@@ -560,11 +563,11 @@ contract WatcherTest is Test {
     function test_cumulativeWithdraw_windowResetsAfterDuration() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.3 ether);
+        vault.withdraw(address(mockToken), 0.3 ether);
 
         vm.warp(block.timestamp + 72 hours);
 
-        vault.withdraw(0.3 ether);
+        vault.withdraw(address(mockToken), 0.3 ether);
 
         vm.stopPrank();
     }
@@ -576,17 +579,17 @@ contract WatcherTest is Test {
         vm.startPrank(leti);
 
         // 20% of 1 ETH → accumulated = 20, balance = 0.8 ETH
-        vault.withdraw(0.2 ether);
+        vault.withdraw(address(mockToken), 0.2 ether);
 
         // deposit mid-window → balance = 1.8 ETH, accumulated stays at 20
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         // 0.2 / 1.8 = ~11% → accumulated = 31 > 30 → Rule 3 triggers
-        vault.withdraw(0.2 ether);
+        vault.withdraw(address(mockToken), 0.2 ether);
 
         vm.stopPrank();
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertTrue(hasPending);
     }
 
@@ -594,15 +597,15 @@ contract WatcherTest is Test {
     function test_cumulativeWithdraw_exactBoundary_singleWithdraw() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.3 ether); // exactly 30% of 1 ETH → accumulated = 30
+        vault.withdraw(address(mockToken), 0.3 ether); // exactly 30% of 1 ETH → accumulated = 30
         // 30 > 30 is false → should NOT trigger
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertFalse(hasPending);
 
-        vault.withdraw(0.1 ether); // tiny % but accumulated + this > 30
+        vault.withdraw(address(mockToken), 0.1 ether); // tiny % but accumulated + this > 30
 
-        bool hasPendingAfter = vault.hasPendingWithdraw(leti);
+        bool hasPendingAfter = vault.hasPendingWithdraw(leti, address(mockToken));
         assertTrue(hasPendingAfter);
 
         vm.stopPrank();
@@ -611,36 +614,36 @@ contract WatcherTest is Test {
     // One user's cumulative window doesn't bleed into another
     function test_cumulativeWindow_isolatedPerUser() public {
         vm.prank(leti);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.prank(shai);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.startPrank(leti);
         // Leti burns through her window — 3 x 10% = accumulated > 30%
-        vault.withdraw(0.1 ether);
-        vault.withdraw(0.1 ether);
-        vault.withdraw(0.1 ether); // this one triggers pending for leti
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether); // this one triggers pending for leti
         vm.stopPrank();
 
         // Shai's window should be completely unaffected
         vm.startPrank(shai);
-        vault.withdraw(0.1 ether);
-        vault.withdraw(0.15 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
+        vault.withdraw(address(mockToken), 0.15 ether);
         vm.stopPrank();
 
-        assertTrue(vault.hasPendingWithdraw(leti));
-        assertFalse(vault.hasPendingWithdraw(shai));
+        assertTrue(vault.hasPendingWithdraw(leti, address(mockToken)));
+        assertFalse(vault.hasPendingWithdraw(shai, address(mockToken)));
     }
 
     function test_cancelWithdraw_doesNotIncreaseWindow() public deposited(leti, 1 ether) {
         vm.startPrank(leti);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
-        vault.cancelWithdraw();
+        vault.cancelWithdraw(address(mockToken));
 
-        vault.withdraw(0.3 ether);
+        vault.withdraw(address(mockToken), 0.3 ether);
 
         vm.stopPrank();
     }
@@ -734,7 +737,7 @@ contract WatcherTest is Test {
         vm.startPrank(leti);
         vault.setSafeAddress(shai);
 
-        vault.withdraw(0.8 ether); // >60% → pending
+        vault.withdraw(address(mockToken), 0.8 ether); // >60% → pending
 
         vm.expectRevert(Watcher.PendingWithdrawalExists.selector);
         vault.requestSafeAddressChange(0, eve);
@@ -857,14 +860,14 @@ contract WatcherTest is Test {
         vault.emergencyLock(24 hours);
 
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdrawToSafe(shai, 1 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 1 ether);
     }
 
     function test_withdrawToSafe_reverts_ifSafeNotSet() public deposited(leti, 1 ether) {
         vm.prank(leti);
 
         vm.expectRevert(Watcher.SafeAddressNotRegistered.selector);
-        vault.withdrawToSafe(shai, 1 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 1 ether);
     }
 
     function test_withdrawToSafe_reverts_ifPendingWithdrawExists() public deposited(leti, 1 ether) {
@@ -872,10 +875,10 @@ contract WatcherTest is Test {
 
         vault.setSafeAddress(shai);
 
-        vault.withdraw(0.8 ether); // >60% → pending
+        vault.withdraw(address(mockToken), 0.8 ether); // >60% → pending
 
         vm.expectRevert(Watcher.PendingWithdrawalExists.selector);
-        vault.withdrawToSafe(shai, 0.1 ether); // remaining balance is 0.2 ether
+        vault.withdrawToSafe(address(mockToken), shai, 0.1 ether); // remaining balance is 0.2 ether
 
         vm.stopPrank();
     }
@@ -886,7 +889,7 @@ contract WatcherTest is Test {
         vault.setSafeAddress(shai);
 
         vm.expectRevert(Watcher.AmountZero.selector);
-        vault.withdrawToSafe(shai, 0);
+        vault.withdrawToSafe(address(mockToken), shai, 0);
 
         vm.stopPrank();
     }
@@ -897,7 +900,7 @@ contract WatcherTest is Test {
         vault.setSafeAddress(shai);
 
         vm.expectRevert(abi.encodeWithSelector(Watcher.InsufficientBalance.selector, 0));
-        vault.withdrawToSafe(shai, 1 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 1 ether);
 
         vm.stopPrank();
     }
@@ -908,7 +911,7 @@ contract WatcherTest is Test {
         vault.setSafeAddress(shai);
 
         vm.expectRevert(abi.encodeWithSelector(Watcher.InsufficientBalance.selector, 1 ether));
-        vault.withdrawToSafe(shai, 2 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 2 ether);
 
         vm.stopPrank();
     }
@@ -918,17 +921,17 @@ contract WatcherTest is Test {
 
         vault.setSafeAddress(shai);
 
-        uint256 safeBalanceBefore = shai.balance;
+        uint256 safeBalanceBefore = mockToken.balanceOf(shai);
 
         vm.expectEmit(true, true, false, true);
-        emit Watcher.WithdrawToSafe(leti, shai, 1 ether);
-        vault.withdrawToSafe(shai, 1 ether);
+        emit Watcher.WithdrawToSafe(leti, address(mockToken), shai, 1 ether);
+        vault.withdrawToSafe(address(mockToken), shai, 1 ether);
 
-        uint256 safeBalanceAfter = shai.balance;
+        uint256 safeBalanceAfter = mockToken.balanceOf(shai);
 
         assertEq(safeBalanceAfter, safeBalanceBefore + 1 ether);
 
-        uint256 remaining = vault.balances(leti);
+        uint256 remaining = vault.balances(leti, address(mockToken));
         assertEq(remaining, 0);
 
         vm.stopPrank();
@@ -947,16 +950,16 @@ contract WatcherTest is Test {
 
         assertEq(vault.getSafeAddresses(leti)[0], eve);
 
-        uint256 eveBalanceBefore = eve.balance;
+        uint256 eveBalanceBefore = mockToken.balanceOf(eve);
 
         // withdrawToSafe should go to eve
-        vault.withdrawToSafe(eve, 1 ether);
+        vault.withdrawToSafe(address(mockToken), eve, 1 ether);
 
         vm.stopPrank();
 
-        assertEq(eve.balance, eveBalanceBefore + 1 ether);
-        assertEq(shai.balance, INITIAL_BALANCE); // untouched
-        assertEq(vault.balances(leti), 0);
+        assertEq(mockToken.balanceOf(eve), eveBalanceBefore + 1 ether);
+        assertEq(mockToken.balanceOf(shai), INITIAL_BALANCE); // untouched
+        assertEq(vault.balances(leti, address(mockToken)), 0);
     }
 
     /*
@@ -967,63 +970,42 @@ contract WatcherTest is Test {
 
     function test_multipleUsersDeposit_accountingIsolation() public {
         vm.prank(leti);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.prank(shai);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.prank(leti);
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
-        bool letiPending = vault.hasPendingWithdraw(leti);
+        bool letiPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
-        bool shaiPending = vault.hasPendingWithdraw(shai);
+        bool shaiPending = vault.hasPendingWithdraw(shai, address(mockToken));
 
         assertTrue(letiPending);
         assertFalse(shaiPending);
 
-        uint256 shaiBalanceBefore = shai.balance;
+        uint256 shaiBalanceBefore = mockToken.balanceOf(shai);
         vm.prank(shai);
-        vault.withdraw(0.1 ether);
+        vault.withdraw(address(mockToken), 0.1 ether);
 
-        assertEq(shai.balance, shaiBalanceBefore + 0.1 ether);
-    }
-
-    function test_multiUser_accountingIntegrity() public {
-        vm.prank(leti);
-        vault.deposit{value: 1 ether}();
-
-        vm.prank(shai);
-        vault.deposit{value: 2 ether}();
-
-        vm.prank(leti);
-        vault.withdraw(0.8 ether);
-
-        (uint256 pendingAmount,,) = vault.getPendingWithdraw(leti);
-
-        uint256 total = vault.totalBalance();
-
-        uint256 letiBal = vault.balances(leti);
-
-        uint256 shaiBal = vault.balances(shai);
-
-        assertEq(total, letiBal + shaiBal + pendingAmount);
+        assertEq(mockToken.balanceOf(shai), shaiBalanceBefore + 0.1 ether);
     }
 
     function test_repeatedPendingCycle() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         for (uint256 i = 0; i < 3; i++) {
-            vault.withdraw(0.8 ether);
+            vault.withdraw(address(mockToken), 0.8 ether);
 
-            vault.cancelWithdraw();
+            vault.cancelWithdraw(address(mockToken));
         }
 
         vm.stopPrank();
 
-        uint256 balance = vault.balances(leti);
+        uint256 balance = vault.balances(leti, address(mockToken));
 
         assertEq(balance, 1 ether);
     }
@@ -1031,29 +1013,44 @@ contract WatcherTest is Test {
     function test_exactBoundary60Percent() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         // exactly 60%
-        vault.withdraw(0.6 ether);
+        vault.withdraw(address(mockToken), 0.6 ether);
 
         vm.stopPrank();
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
 
         // > 60 triggers, not == 60
         assertFalse(hasPending);
     }
 
-    function test_receiveFunctionDeposit() public {
+    function test_deposit_revertsForUnlistedToken() public {
+        MockERC20 other = new MockERC20();
+
         vm.prank(leti);
+        vm.expectRevert(Watcher.TokenNotAllowed.selector);
+        vault.deposit(address(other), 1 ether);
+    }
 
+    function test_receive_revertsUseWETH() public {
+        vm.deal(leti, 1 ether);
+
+        vm.prank(leti);
+        vm.expectRevert(Watcher.UseWETH.selector);
         (bool success,) = address(vault).call{value: 1 ether}("");
+        success;
 
-        assertTrue(success);
+        assertEq(address(vault).balance, 0);
+    }
 
-        uint256 balance = vault.balances(leti);
+    function test_addToken_revertsForNonOwner() public {
+        MockERC20 other = new MockERC20();
 
-        assertEq(balance, 1 ether);
+        vm.prank(leti);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, leti));
+        vault.addToken(address(other));
     }
 
     // Cancel pending, deposit more, withdraw again — full cycle
@@ -1061,24 +1058,24 @@ contract WatcherTest is Test {
         vm.startPrank(leti);
 
         // Trigger pending
-        vault.withdraw(0.8 ether);
-        assertEq(vault.balances(leti), 0.2 ether);
-        assertTrue(vault.hasPendingWithdraw(leti));
+        vault.withdraw(address(mockToken), 0.8 ether);
+        assertEq(vault.balances(leti, address(mockToken)), 0.2 ether);
+        assertTrue(vault.hasPendingWithdraw(leti, address(mockToken)));
 
         // Cancel — balance restored
-        vault.cancelWithdraw();
-        assertEq(vault.balances(leti), 1 ether);
-        assertFalse(vault.hasPendingWithdraw(leti));
+        vault.cancelWithdraw(address(mockToken));
+        assertEq(vault.balances(leti, address(mockToken)), 1 ether);
+        assertFalse(vault.hasPendingWithdraw(leti, address(mockToken)));
 
         // Deposit more
-        vault.deposit{value: 1 ether}();
-        assertEq(vault.balances(leti), 2 ether);
+        vault.deposit(address(mockToken), 1 ether);
+        assertEq(vault.balances(leti, address(mockToken)), 2 ether);
 
         // Withdraw small amount — should be instant
-        vault.withdraw(0.1 ether);
-        assertFalse(vault.hasPendingWithdraw(leti));
+        vault.withdraw(address(mockToken), 0.1 ether);
+        assertFalse(vault.hasPendingWithdraw(leti, address(mockToken)));
 
-        uint256 finalBalance = vault.balances(leti);
+        uint256 finalBalance = vault.balances(leti, address(mockToken));
         assertEq(finalBalance, 1.9 ether);
 
         vm.stopPrank();
@@ -1093,9 +1090,9 @@ contract WatcherTest is Test {
     function test_getUserVaultBalance() public {
         vm.prank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        uint256 balance = vault.getUserVaultBalance(leti);
+        uint256 balance = vault.getUserVaultBalance(leti, address(mockToken));
 
         assertEq(balance, 1 ether);
     }
@@ -1103,15 +1100,15 @@ contract WatcherTest is Test {
     function test_hasPendingWithdraw() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        bool hasPending = vault.hasPendingWithdraw(leti);
+        bool hasPending = vault.hasPendingWithdraw(leti, address(mockToken));
         assertFalse(hasPending);
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
         vm.stopPrank();
 
-        bool hasPendingAfter = vault.hasPendingWithdraw(leti);
+        bool hasPendingAfter = vault.hasPendingWithdraw(leti, address(mockToken));
 
         assertTrue(hasPendingAfter);
     }
@@ -1119,14 +1116,14 @@ contract WatcherTest is Test {
     function test_getInstantWithdrawLimit() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        uint256 available = vault.getInstantWithdrawLimit(leti);
+        uint256 available = vault.getInstantWithdrawLimit(leti, address(mockToken));
         assertEq(available, 0.6 ether);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
-        uint256 afterPending = vault.getInstantWithdrawLimit(leti);
+        uint256 afterPending = vault.getInstantWithdrawLimit(leti, address(mockToken));
 
         assertEq(afterPending, 0);
 
@@ -1136,11 +1133,11 @@ contract WatcherTest is Test {
     function test_getPendingWithdraw() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
-        (uint256 amount, uint256 unlockTime, uint256 requestTime) = vault.getPendingWithdraw(leti);
+        (uint256 amount, uint256 unlockTime, uint256 requestTime) = vault.getPendingWithdraw(leti, address(mockToken));
 
         assertEq(amount, 0.8 ether);
         assertGt(unlockTime, requestTime);
@@ -1151,7 +1148,7 @@ contract WatcherTest is Test {
     function test_IsVaultLocked() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
         vault.emergencyLock(24 hours);
 
         bool locked = vault.isVaultLocked(leti);
@@ -1167,7 +1164,7 @@ contract WatcherTest is Test {
     function test_getRemainingLockTime() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vault.emergencyLock(24 hours);
 
@@ -1186,11 +1183,11 @@ contract WatcherTest is Test {
     function test_getRemainingPendingTime() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
-        vault.withdraw(0.8 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
-        uint256 remaining = vault.getRemainingPendingTime(leti);
+        uint256 remaining = vault.getRemainingPendingTime(leti, address(mockToken));
 
         assertGt(remaining, 0);
         assertEq(remaining, 12 hours);
@@ -1201,8 +1198,8 @@ contract WatcherTest is Test {
     function test_getUserState() public {
         vm.startPrank(leti);
 
-        vault.deposit{value: 1 ether}();
-        vault.withdraw(0.8 ether);
+        vault.deposit(address(mockToken), 1 ether);
+        vault.withdraw(address(mockToken), 0.8 ether);
 
         (
             uint256 balance,
@@ -1211,7 +1208,7 @@ contract WatcherTest is Test {
             uint256 pendingAmount,
             uint256 remainingPendingTime,
             bool locked,
-        ) = vault.getUserState(leti);
+        ) = vault.getUserState(leti, address(mockToken));
 
         assertEq(balance, 0.2 ether);
         assertEq(instantLimit, 0 ether);

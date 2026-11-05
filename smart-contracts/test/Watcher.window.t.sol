@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Watcher} from "../src/Watcher.sol";
+import {MockERC20} from "./Watcher.t.sol";
 
 /**
  * @title Watcher Rule 3 (cumulative window) tests
@@ -11,23 +12,34 @@ import {Watcher} from "../src/Watcher.sol";
  */
 contract WatcherWindowTest is Test {
     Watcher vault;
+    MockERC20 mockToken;
 
     address user = makeAddr("user");
 
     uint256 constant INITIAL_BALANCE = 10 ether;
-    uint256 constant CAP = 0.3e18; // MAX_INSTANT_WITHDRAW_WAD
+    uint256 constant CAP = 0.3e18; // MAX_CUMULATIVE_WITHDRAW_WAD
 
     function setUp() public {
-        vault = new Watcher();
-        vm.deal(user, INITIAL_BALANCE);
+        mockToken = new MockERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mockToken);
+        vault = new Watcher(tokens);
+        _fund(user, INITIAL_BALANCE);
 
         vm.prank(user);
-        vault.deposit{value: INITIAL_BALANCE}();
+        vault.deposit(address(mockToken), INITIAL_BALANCE);
+    }
+
+    // Replaces vm.deal: mints tokens and pre-approves the vault so deposits work inside startPrank
+    function _fund(address account, uint256 amount) internal {
+        mockToken.mint(account, amount);
+        vm.prank(account);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     function _withdraw(uint256 amount) internal {
         vm.prank(user);
-        vault.withdraw(amount);
+        vault.withdraw(address(mockToken), amount);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -35,7 +47,8 @@ contract WatcherWindowTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_windowState_freshUser() public view {
-        (uint256 used, uint256 remaining, uint256 windowStart, uint256 resetsIn) = vault.getWindowState(user);
+        (uint256 used, uint256 remaining, uint256 windowStart, uint256 resetsIn) =
+            vault.getWindowState(user, address(mockToken));
 
         assertEq(used, 0);
         assertEq(remaining, CAP);
@@ -46,12 +59,13 @@ contract WatcherWindowTest is Test {
     function test_windowState_afterWithdraw() public {
         _withdraw(1 ether); // 10%
 
-        (uint256 used, uint256 remaining, uint256 windowStart, uint256 resetsIn) = vault.getWindowState(user);
+        (uint256 used, uint256 remaining, uint256 windowStart, uint256 resetsIn) =
+            vault.getWindowState(user, address(mockToken));
 
         assertEq(used, 0.1e18);
         assertEq(remaining, 0.2e18);
         assertEq(windowStart, block.timestamp);
-        assertEq(resetsIn, vault.WINDOW_DURATION_FOR_MAX_WITHDRAW() + 1);
+        assertEq(resetsIn, vault.CUMULATIVE_WITHDRAW_WINDOW_DURATION() + 1);
     }
 
     function test_windowState_expiryIsApplied() public {
@@ -59,16 +73,16 @@ contract WatcherWindowTest is Test {
         uint256 start = block.timestamp;
 
         // Still active at the exact window boundary
-        vm.warp(start + vault.WINDOW_DURATION_FOR_MAX_WITHDRAW());
-        (uint256 used,,, uint256 resetsIn) = vault.getWindowState(user);
+        vm.warp(start + vault.CUMULATIVE_WITHDRAW_WINDOW_DURATION());
+        (uint256 used,,, uint256 resetsIn) = vault.getWindowState(user, address(mockToken));
         assertEq(used, 0.1e18);
         assertEq(resetsIn, 1);
 
         // Expired: reports a clean window although storage was not reset yet
-        vm.warp(start + vault.WINDOW_DURATION_FOR_MAX_WITHDRAW() + 1);
+        vm.warp(start + vault.CUMULATIVE_WITHDRAW_WINDOW_DURATION() + 1);
         uint256 remaining;
         uint256 windowStart;
-        (used, remaining, windowStart, resetsIn) = vault.getWindowState(user);
+        (used, remaining, windowStart, resetsIn) = vault.getWindowState(user, address(mockToken));
         assertEq(used, 0);
         assertEq(remaining, CAP);
         assertEq(windowStart, 0);
@@ -79,7 +93,7 @@ contract WatcherWindowTest is Test {
         _withdraw(1 ether); // 10% of 10
         _withdraw(1.8 ether); // 20% of 9
 
-        (uint256 used, uint256 remaining,,) = vault.getWindowState(user);
+        (uint256 used, uint256 remaining,,) = vault.getWindowState(user, address(mockToken));
         assertEq(used, CAP);
         assertEq(remaining, 0);
     }
@@ -92,36 +106,36 @@ contract WatcherWindowTest is Test {
         _withdraw(1 ether); // 10%, balance now 9
 
         // Rule 1 alone would allow 5.4 ether, Rule 3 only 20% of 9
-        assertEq(vault.getInstantWithdrawLimit(user), 1.8 ether);
-        (, uint256 limit,,,,,) = vault.getUserState(user);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 1.8 ether);
+        (, uint256 limit,,,,,) = vault.getUserState(user, address(mockToken));
         assertEq(limit, 1.8 ether);
     }
 
     function test_instantLimit_isExactRule3Boundary() public {
         _withdraw(1 ether);
-        uint256 limit = vault.getInstantWithdrawLimit(user);
+        uint256 limit = vault.getInstantWithdrawLimit(user, address(mockToken));
 
         uint256 snapshot = vm.snapshotState();
 
         _withdraw(limit + 1);
-        assertTrue(vault.hasPendingWithdraw(user));
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
 
         vm.revertToState(snapshot);
 
         _withdraw(limit);
-        assertFalse(vault.hasPendingWithdraw(user));
-        assertEq(vault.getInstantWithdrawLimit(user), 0);
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 0);
     }
 
     function test_instantLimit_restoredAfterWindowExpires() public {
         _withdraw(1 ether);
         _withdraw(1.8 ether);
-        assertEq(vault.getInstantWithdrawLimit(user), 0);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 0);
 
-        vm.warp(block.timestamp + vault.WINDOW_DURATION_FOR_MAX_WITHDRAW() + 1);
+        vm.warp(block.timestamp + vault.CUMULATIVE_WITHDRAW_WINDOW_DURATION() + 1);
 
         // Back to Rule 1 only: 60% of 7.2
-        assertEq(vault.getInstantWithdrawLimit(user), 4.32 ether);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 4.32 ether);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -135,21 +149,21 @@ contract WatcherWindowTest is Test {
 
         _withdraw(1.889 ether); // 20.99% of 9
 
-        assertTrue(vault.hasPendingWithdraw(user));
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 
     function test_executedDelayedWithdraw_countsExactShare() public {
         _withdraw(8 ether); // 80%, delayed by Rule 1
-        assertTrue(vault.hasPendingWithdraw(user));
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
 
-        vm.warp(block.timestamp + vault.DELAY());
+        vm.warp(block.timestamp + vault.RISKY_WITHDRAWAL_DELAY());
         vm.prank(user);
-        vault.executeWithdraw();
+        vault.executeWithdraw(address(mockToken));
 
-        (uint256 used, uint256 remaining,,) = vault.getWindowState(user);
+        (uint256 used, uint256 remaining,,) = vault.getWindowState(user, address(mockToken));
         assertEq(used, 0.8e18);
         assertEq(remaining, 0);
-        assertEq(vault.getInstantWithdrawLimit(user), 0);
+        assertEq(vault.getInstantWithdrawLimit(user, address(mockToken)), 0);
     }
 
     function testFuzz_instantLimit_neverDelayed(uint256 first, uint256 elapsed) public {
@@ -160,10 +174,10 @@ contract WatcherWindowTest is Test {
         _withdraw(first);
         vm.warp(block.timestamp + elapsed);
 
-        uint256 limit = vault.getInstantWithdrawLimit(user);
+        uint256 limit = vault.getInstantWithdrawLimit(user, address(mockToken));
         vm.assume(limit > 0);
 
         _withdraw(limit);
-        assertFalse(vault.hasPendingWithdraw(user));
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
     }
 }

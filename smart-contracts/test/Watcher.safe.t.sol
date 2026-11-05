@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Watcher} from "../src/Watcher.sol";
+import {MockERC20} from "./Watcher.t.sol";
 
 /**
  * @title Watcher two-slot Trusted Recovery Address tests
@@ -11,6 +12,7 @@ import {Watcher} from "../src/Watcher.sol";
  */
 contract WatcherSafeSlotsTest is Test {
     Watcher vault;
+    MockERC20 mockToken;
 
     address user = makeAddr("user");
     address primary = makeAddr("primary");
@@ -21,13 +23,23 @@ contract WatcherSafeSlotsTest is Test {
     uint256 constant INITIAL_BALANCE = 10 ether;
 
     function setUp() public {
-        vault = new Watcher();
-        vm.deal(user, INITIAL_BALANCE);
+        mockToken = new MockERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mockToken);
+        vault = new Watcher(tokens);
+        _fund(user, INITIAL_BALANCE);
 
         vm.startPrank(user);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
         vault.setSafeAddress(primary);
         vm.stopPrank();
+    }
+
+    // Replaces vm.deal: mints tokens and pre-approves the vault so deposits work inside startPrank
+    function _fund(address account, uint256 amount) internal {
+        mockToken.mint(account, amount);
+        vm.prank(account);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     function _changeSlot(uint8 slot, address newSafe) internal {
@@ -64,8 +76,8 @@ contract WatcherSafeSlotsTest is Test {
 
         // Backup is a valid withdrawToSafe destination
         vm.prank(user);
-        vault.withdrawToSafe(backup, 0.1 ether);
-        assertEq(backup.balance, 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), backup, 0.1 ether);
+        assertEq(mockToken.balanceOf(backup), 0.1 ether);
     }
 
     function test_replaceSlot0_keepsBackup() public {
@@ -79,7 +91,7 @@ contract WatcherSafeSlotsTest is Test {
         // Old primary is no longer a valid destination
         vm.prank(user);
         vm.expectRevert(Watcher.SafeAddressNotRegistered.selector);
-        vault.withdrawToSafe(primary, 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), primary, 0.1 ether);
     }
 
     function test_replaceSlot1_keepsPrimary() public {
@@ -92,7 +104,7 @@ contract WatcherSafeSlotsTest is Test {
 
         vm.prank(user);
         vm.expectRevert(Watcher.SafeAddressNotRegistered.selector);
-        vault.withdrawToSafe(backup, 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), backup, 0.1 ether);
     }
 
     function test_requestSafeAddressChange_rejectsDuplicate() public {
@@ -136,19 +148,19 @@ contract WatcherSafeSlotsTest is Test {
     function test_withdrawToSafe_rejectsZeroAddress() public {
         vm.prank(user);
         vm.expectRevert(Watcher.InvalidSafeAddress.selector);
-        vault.withdrawToSafe(address(0), 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), address(0), 0.1 ether);
     }
 
     function test_withdrawToSafe_rejectsZeroAddress_whenNoSafeSet() public {
         // Empty slots hold address(0); it must never match as a destination
         address fresh = makeAddr("fresh");
-        vm.deal(fresh, 1 ether);
+        _fund(fresh, 1 ether);
 
         vm.startPrank(fresh);
-        vault.deposit{value: 1 ether}();
+        vault.deposit(address(mockToken), 1 ether);
 
         vm.expectRevert(Watcher.InvalidSafeAddress.selector);
-        vault.withdrawToSafe(address(0), 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), address(0), 0.1 ether);
 
         vm.stopPrank();
     }
@@ -156,10 +168,10 @@ contract WatcherSafeSlotsTest is Test {
     function test_withdrawToSafe_rejectsUnregisteredAddress() public {
         vm.prank(user);
         vm.expectRevert(Watcher.SafeAddressNotRegistered.selector);
-        vault.withdrawToSafe(stranger, 0.1 ether);
+        vault.withdrawToSafe(address(mockToken), stranger, 0.1 ether);
 
-        assertEq(stranger.balance, 0);
-        assertEq(vault.balances(user), 1 ether);
+        assertEq(mockToken.balanceOf(stranger), 0);
+        assertEq(vault.balances(user, address(mockToken)), 1 ether);
     }
 
     function test_setSafeAddress_revertsOnceSlot0Set() public {

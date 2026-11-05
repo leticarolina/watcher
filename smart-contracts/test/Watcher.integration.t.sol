@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {Watcher} from "../src/Watcher.sol";
+import {MockERC20} from "./Watcher.t.sol";
 
 /**
  * @title Watcher Integration Tests
@@ -13,6 +14,7 @@ import {Watcher} from "../src/Watcher.sol";
  */
 contract WatcherIntegrationTest is Test {
     Watcher vault;
+    MockERC20 mockToken;
 
     // Actors
     address user = makeAddr("user");
@@ -23,9 +25,19 @@ contract WatcherIntegrationTest is Test {
     uint256 constant INITIAL_BALANCE = 10 ether;
 
     function setUp() public {
-        vault = new Watcher();
-        vm.deal(user, INITIAL_BALANCE);
-        vm.deal(attacker, INITIAL_BALANCE);
+        mockToken = new MockERC20();
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mockToken);
+        vault = new Watcher(tokens);
+        _fund(user, INITIAL_BALANCE);
+        _fund(attacker, INITIAL_BALANCE);
+    }
+
+    // Replaces vm.deal: mints tokens and pre-approves the vault so deposits work inside startPrank
+    function _fund(address account, uint256 amount) internal {
+        mockToken.mint(account, amount);
+        vm.prank(account);
+        mockToken.approve(address(vault), type(uint256).max);
     }
 
     /*
@@ -48,42 +60,42 @@ contract WatcherIntegrationTest is Test {
         // --- SETUP ---
         // User deposits and registers safe address while keys are still secure
         vm.startPrank(user);
-        vault.deposit{value: 5 ether}();
+        vault.deposit(address(mockToken), 5 ether);
         vault.setSafeAddress(safeWallet);
         vm.stopPrank();
 
-        assertEq(vault.balances(user), 5 ether);
+        assertEq(vault.balances(user, address(mockToken)), 5 ether);
         assertEq(vault.getSafeAddresses(user)[0], safeWallet);
 
         // --- ATTACK BEGINS ---
         // Attacker now has user's key. Sends small probe first (4% of balance).
         vm.prank(user); // attacker is using user's compromised key
-        vault.withdraw(0.2 ether); // 4% of 5 ETH
+        vault.withdraw(address(mockToken), 0.2 ether); // 4% of 5 ETH
 
         // Probe executes instantly — Rule 2 arms
-        assertFalse(vault.hasPendingWithdraw(user));
-        assertEq(vault.lastProbeTime(user), block.timestamp);
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
+        assertEq(vault.lastProbeTime(user, address(mockToken)), block.timestamp);
 
         // Attacker now attempts large drain — any amount triggers Rule 2
         vm.prank(user);
-        vault.withdraw(3 ether); // flagged by Rule 2
+        vault.withdraw(address(mockToken), 3 ether); // flagged by Rule 2
 
         // Large drain is now pending, NOT executed
-        assertTrue(vault.hasPendingWithdraw(user));
-        (uint256 pendingAmount,,) = vault.getPendingWithdraw(user);
+        assertTrue(vault.hasPendingWithdraw(user, address(mockToken)));
+        (uint256 pendingAmount,,) = vault.getPendingWithdraw(user, address(mockToken));
         assertEq(pendingAmount, 3 ether);
 
         // Funds are deducted from balance but sitting in pending — not sent yet
-        assertEq(vault.balances(user), 1.8 ether); // 5 - 0.2 - 3
+        assertEq(vault.balances(user, address(mockToken)), 1.8 ether); // 5 - 0.2 - 3
 
         // --- USER DETECTS AND RESPONDS ---
         // User notices the suspicious pending withdrawal and cancels it
         vm.prank(user);
-        vault.cancelWithdraw();
+        vault.cancelWithdraw(address(mockToken));
 
         // Funds restored to vault
-        assertFalse(vault.hasPendingWithdraw(user));
-        assertEq(vault.balances(user), 4.8 ether); // 5 - 0.2 probe
+        assertFalse(vault.hasPendingWithdraw(user, address(mockToken)));
+        assertEq(vault.balances(user, address(mockToken)), 4.8 ether); // 5 - 0.2 probe
 
         // User activates emergency lock to buy time
         vm.prank(user);
@@ -94,7 +106,7 @@ contract WatcherIntegrationTest is Test {
         // Attacker tries to withdraw again while locked — blocked
         vm.prank(user);
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdraw(4 ether);
+        vault.withdraw(address(mockToken), 4 ether);
 
         // Attacker tries to change safe address while locked — blocked
         vm.prank(user);
@@ -106,14 +118,14 @@ contract WatcherIntegrationTest is Test {
         vm.warp(vault.lockedUntil(user));
         assertFalse(vault.isVaultLocked(user));
 
-        uint256 safeBalanceBefore = safeWallet.balance;
+        uint256 safeBalanceBefore = mockToken.balanceOf(safeWallet);
 
         vm.prank(user);
-        vault.withdrawToSafe(safeWallet, 4.8 ether);
+        vault.withdrawToSafe(address(mockToken), safeWallet, 4.8 ether);
 
         // All remaining funds sent to safe wallet — attacker got nothing beyond the probe
-        assertEq(vault.balances(user), 0);
-        assertEq(safeWallet.balance, safeBalanceBefore + 4.8 ether);
+        assertEq(vault.balances(user, address(mockToken)), 0);
+        assertEq(mockToken.balanceOf(safeWallet), safeBalanceBefore + 4.8 ether);
 
         // Attacker only got the 0.2 ETH probe — 96% of funds saved
     }
@@ -135,7 +147,7 @@ contract WatcherIntegrationTest is Test {
     function test_integration_safeAddressHijackAttempt() public {
         // --- SETUP ---
         vm.startPrank(user);
-        vault.deposit{value: 3 ether}();
+        vault.deposit(address(mockToken), 3 ether);
         vault.setSafeAddress(safeWallet);
         vm.stopPrank();
 
@@ -174,16 +186,16 @@ contract WatcherIntegrationTest is Test {
         // --- USER RECOVERS ---
         vm.warp(vault.lockedUntil(user));
 
-        uint256 safeBalanceBefore = safeWallet.balance;
-        uint256 attackerWalletBefore = attackerWallet.balance;
+        uint256 safeBalanceBefore = mockToken.balanceOf(safeWallet);
+        uint256 attackerWalletBefore = mockToken.balanceOf(attackerWallet);
 
         vm.prank(user);
-        vault.withdrawToSafe(safeWallet, 3 ether);
+        vault.withdrawToSafe(address(mockToken), safeWallet, 3 ether);
 
         // Funds went to legitimate safe wallet, attacker wallet untouched
-        assertEq(safeWallet.balance, safeBalanceBefore + 3 ether);
-        assertEq(attackerWallet.balance, attackerWalletBefore);
-        assertEq(vault.balances(user), 0);
+        assertEq(mockToken.balanceOf(safeWallet), safeBalanceBefore + 3 ether);
+        assertEq(mockToken.balanceOf(attackerWallet), attackerWalletBefore);
+        assertEq(vault.balances(user, address(mockToken)), 0);
     }
 
     /*
@@ -205,7 +217,7 @@ contract WatcherIntegrationTest is Test {
     function test_integration_lockBypassAttempt() public {
         // --- SETUP ---
         vm.startPrank(user);
-        vault.deposit{value: 4 ether}();
+        vault.deposit(address(mockToken), 4 ether);
         vault.setSafeAddress(safeWallet);
         vm.stopPrank();
 
@@ -224,7 +236,7 @@ contract WatcherIntegrationTest is Test {
         // Attacker tries to withdraw during lock — blocked
         vm.prank(user);
         vm.expectRevert(Watcher.EmergencyLockOngoing.selector);
-        vault.withdraw(4 ether);
+        vault.withdraw(address(mockToken), 4 ether);
 
         // Attacker tries to shorten lock — blocked
         vm.warp(block.timestamp + 1 hours);
@@ -256,13 +268,13 @@ contract WatcherIntegrationTest is Test {
         vm.warp(vault.lockedUntil(user));
         assertFalse(vault.isVaultLocked(user));
 
-        uint256 safeBalanceBefore = safeWallet.balance;
+        uint256 safeBalanceBefore = mockToken.balanceOf(safeWallet);
 
         vm.prank(user);
-        vault.withdrawToSafe(safeWallet, 4 ether);
+        vault.withdrawToSafe(address(mockToken), safeWallet, 4 ether);
 
-        assertEq(safeWallet.balance, safeBalanceBefore + 4 ether);
-        assertEq(vault.balances(user), 0);
-        assertEq(attackerWallet.balance, 0); // attacker got nothing
+        assertEq(mockToken.balanceOf(safeWallet), safeBalanceBefore + 4 ether);
+        assertEq(vault.balances(user, address(mockToken)), 0);
+        assertEq(mockToken.balanceOf(attackerWallet), 0); // attacker got nothing
     }
 }
