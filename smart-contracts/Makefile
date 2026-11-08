@@ -4,10 +4,13 @@
 RPC_URL_SEPOLIA := $(RPC_URL_SEPOLIA)
 RPC_URL_LOCAL := http://127.0.0.1:8545
 ACCOUNT := acc3
+SENDER := 0x0944f6502a7e99f073750000c4f7889611a706c6
 ETHERSCAN_API_KEY := $(ETHERSCAN_API_KEY)
 
 CONTRACT := $(CONTRACT_ADDRESS)
 USER := $(USER_ADDRESS)
+TOKEN := $(TOKEN_ADDRESS)
+AMOUNT := $(AMOUNT)
 
 # ================================
 # BUILD
@@ -49,23 +52,23 @@ coverage:
 # ================================
 
 simulate:
-	forge script script/DeployWatcher.sol \
+	forge script script/DeployWatcher.s.sol \
 	--rpc-url $(RPC_URL_SEPOLIA) \
 	--account $(ACCOUNT) \
 	-vvv
 
 deploy-sepolia:
-	forge script script/DeployWatcher.sol \
+	forge script script/DeployWatcher.s.sol \
 	--rpc-url $(RPC_URL_SEPOLIA) \
-	--account acc3 \
-	--sender 0x0944f6502a7e99f073750000c4f7889611a706c6 \
+	--account $(ACCOUNT) \
+	--sender $(SENDER) \
 	--broadcast \
 	--verify \
 	--etherscan-api-key $(ETHERSCAN_API_KEY) \
 	-vvv
 
 deploy-local:
-	forge script script/DeployWatcher.sol \
+	forge script script/DeployWatcher.s.sol \
 	--rpc-url $(RPC_URL_LOCAL) \
 	--account $(ACCOUNT) \
 	--broadcast \
@@ -79,40 +82,48 @@ fork-anvil:
 	anvil --fork-url $(RPC_URL_SEPOLIA)
 
 # ================================
+# TOKEN SETUP (run once per token per user)
+# approve Watcher to spend your tokens before depositing
+# make approve TOKEN=0x... AMOUNT=1000000000000000000
+# ================================
+
+approve:
+	cast send $(TOKEN) \
+	"approve(address,uint256)" \
+	$(CONTRACT) $(AMOUNT) \
+	--account $(ACCOUNT) \
+	--rpc-url $(RPC_URL_SEPOLIA)
+
+# ================================
 # CONTRACT INTERACTIONS
+# usage: make deposit TOKEN=0x... AMOUNT=1000000000000000000
 # ================================
 
 deposit:
 	cast send $(CONTRACT) \
-	"deposit()" \
-	--value 1ether \
+	"deposit(address,uint256)" \
+	$(TOKEN) $(AMOUNT) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 withdraw:
 	cast send $(CONTRACT) \
-	"withdraw(uint256)" \
-	100000000000000000 \
-	--account $(ACCOUNT) \
-	--rpc-url $(RPC_URL_SEPOLIA)
-
-withdraw-amount:
-	cast send $(CONTRACT) \
-	"withdraw(uint256)" \
-	$(AMOUNT) \
+	"withdraw(address,uint256)" \
+	$(TOKEN) $(AMOUNT) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 execute:
 	cast send $(CONTRACT) \
-	"executeWithdraw(bytes)" \
-	0x \
+	"executeWithdraw(address)" \
+	$(TOKEN) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 cancel:
 	cast send $(CONTRACT) \
-	"cancelWithdraw()" \
+	"cancelWithdraw(address)" \
+	$(TOKEN) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
@@ -125,51 +136,39 @@ lock:
 
 safe-set:
 	cast send $(CONTRACT) \
-	"setSafeAddress(address)" \
-	$(SAFE) \
+	"setSafeAddress(uint8,address)" \
+	0 $(SAFE) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 withdraw-to-safe:
 	cast send $(CONTRACT) \
-	"withdrawToSafe(uint256)" \
-	$(AMOUNT) \
-	--account $(ACCOUNT) \
-	--rpc-url $(RPC_URL_SEPOLIA)
-
-register-ledger:
-	cast send $(CONTRACT) \
-	"registerLedgerSigner(address)" \
-	$(LEDGER_ADDR) \
+	"withdrawToSafe(address,uint256)" \
+	$(TOKEN) $(AMOUNT) \
 	--account $(ACCOUNT) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 # ================================
 # VIEW FUNCTIONS
+# usage: make balance TOKEN=0x...
 # ================================
 
 balance:
 	cast call $(CONTRACT) \
-	"getUserVaultBalance(address)" \
-	$(USER) \
+	"getBalance(address,address)" \
+	$(USER) $(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 pending:
 	cast call $(CONTRACT) \
-	"hasPendingWithdraw(address)" \
-	$(USER) \
-	--rpc-url $(RPC_URL_SEPOLIA)
-
-limit:
-	cast call $(CONTRACT) \
-	"getInstantWithdrawLimit(address)" \
-	$(USER) \
+	"hasPendingWithdraw(address,address)" \
+	$(USER) $(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 pending-data:
 	cast call $(CONTRACT) \
-	"getPendingWithdraw(address)" \
-	$(USER) \
+	"getPendingWithdraw(address,address)" \
+	$(USER) $(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
 locked:
@@ -186,23 +185,18 @@ lock-time:
 
 pending-time:
 	cast call $(CONTRACT) \
-	"getRemainingPendingTime(address)" \
-	$(USER) \
+	"getRemainingPendingTime(address,address)" \
+	$(USER) $(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
-user-state:
+user-token-state:
 	cast call $(CONTRACT) \
-	"getUserState(address)" \
-	$(USER) \
+	"getUserTokenState(address,address)" \
+	$(USER) $(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)
 
-vault-balance:
+allowed-token:
 	cast call $(CONTRACT) \
-	"totalBalance()" \
-	--rpc-url $(RPC_URL_SEPOLIA)
-
-ledger-state:
-	cast call $(CONTRACT) \
-	"getLedgerSignerState(address)" \
-	$(USER) \
+	"allowedTokens(address)" \
+	$(TOKEN) \
 	--rpc-url $(RPC_URL_SEPOLIA)

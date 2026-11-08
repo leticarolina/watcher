@@ -2,9 +2,9 @@
 
 **Author:** Leticia Azevedo  
 **Contract:** `Watcher.sol`
-**Version:** V2 — ETHGlobal ETHOnline 2026
-**Last Updated:** September 2026
-**Deployed:** [Sepolia — 0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230](https://sepolia.etherscan.io/address/0xB0c7a97cEE61d3Da05e2cF4Fb704e44d2bdFc230)
+**Version:** V2.1
+**Last Updated:** November 2026
+**Deployed:** [0x5777D32B8Daf4624776CBBc1C7A0dD403Cd5cD8a](https://sepolia.etherscan.io/address/0x5777D32B8Daf4624776CBBc1C7A0dD403Cd5cD8a)
 
 ---
 
@@ -26,8 +26,6 @@ Watcher is designed to defend against the following attack scenarios:
 
 An attacker gains access to the user's private key and attempts to drain the vault immediately. Without Watcher, funds are gone in seconds. With Watcher, a large withdrawal is flagged and enters the Security Queue, giving the legitimate user time to detect the unauthorized activity and cancel or trigger Containment Mode.
 
-If the user has registered a Ledger signer, the attacker cannot execute the queued withdrawal even after the 12-hour delay — they would need the physical Ledger device to produce a valid signature.
-
 ### 2. User Error / Fat-Finger
 
 A user accidentally initiates a large withdrawal to the wrong address. The Security Queue provides a cancellation path before funds leave the contract.
@@ -42,7 +40,7 @@ An attacker with partial access extracts funds gradually in smaller increments t
 
 ### 5. Trusted Recovery Address Hijacking
 
-An attacker with a compromised key attempts to change the user's recovery address to their own, then drain via `withdrawToSafe`. The 24-hour delay on recovery address changes prevents this — the legitimate user has time to detect and cancel before it takes effect.
+An attacker with a compromised key attempts to change the user's recovery address to their own, then drain via `withdrawToSafe`. The 24-hour delay on recovery address changes prevents this, the legitimate user has time to detect and cancel before it takes effect.
 
 ### 6. Lock Bypass via Recovery Address Change
 
@@ -50,11 +48,33 @@ An attacker queues a recovery address change during an active Containment Mode, 
 
 ### 7. Lock Duration Reduction
 
-An attacker finds the vault under Containment Mode and attempts to reduce the lock duration by calling `emergencyLock` with a shorter value. The contract enforces extension-only behavior — `lockedUntil` can only move forward in time, never backward.
+An attacker finds the vault under Containment Mode and attempts to reduce the lock duration by calling `emergencyLock` with a shorter value. The contract enforces extension-only behavior, variable `lockedUntil` can only move forward in time, never backward.
 
-### 8. Ledger Signer Removal Attack
+### 8. Threshold Manipulation Attack
 
-An attacker with a compromised key attempts to remove the Ledger signer requirement by calling `requestLedgerSignerChange(address(0))`, wait 24 hours, confirm the removal, then execute the queued withdrawal without hardware authorization. Both `requestLedgerSignerChange` and `confirmLedgerSignerChange` are blocked during Containment Mode. The user can also cancel a pending Ledger signer change at any time, even during Containment Mode.
+An attacker with a compromised key calls `requestThresholdChange` to raise the Rule 1 threshold from 60% to 100%, eliminating the large-withdrawal protection. Raises require a 24-hour delay (`THRESHOLD_CHANGE_DELAY`) before they take effect. The user has time to cancel. Raises are blocked during Containment Mode entirely. Tightening (lowering the threshold) is instant and cannot be blocked.
+
+### 9. Queue-and-Wait Attack
+
+An attacker queues a withdrawal, the user triggers Containment Mode, the attacker waits for both the pending delay and lock to expire, then executes. This path is closed: `emergencyLock` automatically cancels all pending withdrawals across every token, restoring the amount to the user's balance. The withdrawal must be re-queued after the lock expires, which re-triggers behavioral evaluation.
+
+---
+
+## ERC-20 Architecture
+
+V2.1 supports arbitrary ERC-20 tokens. All state is keyed by `(user, token)`:
+
+```solidity
+mapping(address => mapping(address => uint256)) public balances;
+mapping(address => mapping(address => WithdrawalRequest)) public pendingWithdraw;
+mapping(address => mapping(address => uint256)) public lastProbeTime;
+mapping(address => mapping(address => uint256)) withdrawnInWindow;
+mapping(address => mapping(address => uint256)) windowStartTime;
+```
+
+**Why this matters for rule math:** Each token's behavioral state is fully isolated. A probe in WETH does not activate Rule 2 for USDC. Cumulative withdrawals in one token's window do not count toward another token's Rule 3 window. This prevents cross-token contamination while preserving the integrity of each token's behavioral history.
+
+**Token allowlist:** Tokens are added at construction time and can be extended via `addToken(address)` (owner-only). Once added, tokens cannot be removed. The internal `tokenList` array is used by `emergencyLock` to iterate and cancel pending withdrawals across all tokens in one transaction.
 
 ---
 
@@ -62,103 +82,127 @@ An attacker with a compromised key attempts to remove the Ledger signer requirem
 
 ### Rule 1 — Large Withdrawal Threshold
 
-**Trigger:** Withdrawal amount exceeds 60% of the user's current balance.
-**Defends against:** Instant full-balance drain after wallet compromise.
-**Rationale:** Legitimate users rarely need to withdraw the majority of a vault balance in a single transaction. This threshold was chosen to be permissive enough for normal use while catching the most common drain pattern.
+**Trigger:** Withdrawal amount exceeds the user's configured threshold (default 60%) of their current balance.  
+**Defends against:** Instant full-balance drain after wallet compromise.  
+**Implementation:** `amount * 100 > balance * _largeWithdrawPercent(user)` — cross-multiplied to avoid division rounding.
+
+The threshold is configurable per user between `MIN_LARGE_WITHDRAW_PERCENT` (10%) and `MAX_LARGE_WITHDRAW_PERCENT` (100%). Tightening applies instantly. Loosening queues behind a 24-hour delay. See [Configurable Threshold](#configurable-threshold) for the full rationale.
 
 ### Rule 2 — Probe Transaction Detection
 
-**Trigger:** The previous withdrawal was less than 5% of balance at the time it was made.
-**Defends against:** Staged attack behavior where an attacker first verifies wallet access with a small transaction before executing a larger drain.
-**Rationale:** A small probe withdrawal is a strong behavioral signal of staged attack intent. Any withdrawal following a probe, regardless of size, is treated as suspicious.
+**Trigger:** A small withdrawal (< 5% of balance at execution time) was executed within the last `PROBE_DETECTION_WINDOW` (72 hours).  
+**Defends against:** Staged attack behavior where an attacker verifies wallet permissions with a small transaction before executing a larger drain.  
+**Implementation:** `_isProbeActive` checks `lastProbeTime[user][token]` against `block.timestamp`. Probe state is per-token. The 72-hour window means a legitimate user who makes a small withdrawal will only have their next withdrawal delayed for 72 hours, not indefinitely.
+
+**Probe recording:** `_recordProbe` writes `block.timestamp` to `lastProbeTime[user][token]` when `amount * 10_000 < balance * 500` (i.e., amount < 5% of balance). It writes `0` otherwise, clearing any prior probe. This runs only when funds actually leave, cancelling a pending withdrawal does not clear or set probe state, so an attacker cannot erase their probe history by cancelling.
 
 ### Rule 3 — Rolling Window Analysis
 
-**Trigger:** Cumulative withdrawals within the last 72 hours exceed 30% of the user's balance.
-**Defends against:** Slow drain attacks where an attacker extracts funds gradually to avoid triggering Rule 1.
-**Rationale:** A rolling time window catches accumulated suspicious behavior that no single transaction would flag individually.
+**Trigger:** Cumulative withdrawals within the last 72 hours exceed `MAX_CUMULATIVE_WITHDRAW_PERCENT` (30%) of the user's balance.  
+**Defends against:** Slow drain attacks where an attacker extracts funds gradually to avoid triggering Rule 1.  
+**Implementation:** Shares are accumulated in `withdrawnInWindow[user][token]`. The window is initialized on first use, resets after `CUMULATIVE_WITHDRAW_WINDOW_DURATION`, and accumulates otherwise. Each share is calculated against the user's balance at the time of that specific withdrawal.
 
-**Window behavior:** Initializes on first withdrawal, resets after 72 hours. Deposits during an active window do not reset accumulation — the percent of each withdrawal is calculated against the balance at the time of that specific withdrawal.
+**Deposit behavior:** Deposits during an active window do not reset accumulation, but they dilute future withdrawal shares because each share is calculated against the balance at withdrawal time, a larger balance means a smaller share for the same nominal amount.
 
 ---
 
-## Additions — ETHGlobal ETHOnline 2026
+## Configurable Threshold
 
-### Ledger Hardware Authorization
+Users can adjust their Rule 1 threshold via `requestThresholdChange(uint256 newPercent)`.
 
-Users can optionally register a Ledger-derived address as a required co-signer for `executeWithdraw`. When registered, the contract verifies an ECDSA signature over `keccak256(abi.encodePacked(msg.sender, executeAmount, block.chainid))` before releasing funds. The signature must recover to the registered Ledger address.
+**Asymmetric behavior:**
 
-This is on-chain enforcement — the contract itself verifies the hardware signature, not the frontend. A compromised key alone cannot execute a queued withdrawal if Ledger authorization is registered.
+| Direction | Behavior |
+| ----------- | ---------- |
+| Lower pErcent | Applied instantly. Any pending raise is cancelled. Allowed during Containment Mode. |
+| Raise percent | Queued behind `THRESHOLD_CHANGE_DELAY` (24 hours). Blocked during Containment Mode. Only one pending raise allowed at a time. |
 
-Ledger signer changes follow the same 24-hour delay pattern as recovery address changes. Both request and confirm are blocked during Containment Mode. Cancel is always permitted.
+**Rationale:** Tightening can only add protection, an attacker cannot exploit a stricter threshold, so there is no reason to delay it. Loosening reduces protection, an attacker with a compromised key could raise the threshold to 100% and drain in one unqueued transaction. The 24-hour delay ensures the legitimate user can cancel before the raise takes effect.
 
-### emergencyLock Auto-Cancels Pending Withdrawals
+The default threshold (`DEFAULT_LARGE_WITHDRAW_PERCENT` = 60) applies when the user has never changed it. The effective threshold is always read via `_largeWithdrawPercent(user)`, which falls back to the default for zero values.
 
-When Containment Mode is activated, any pending withdrawal is automatically cancelled and the amount is restored to the user's vault balance. This closes the attack window where an attacker queues a withdrawal then waits for the user to lock — previously the withdrawal would remain in the queue and could be executed after the lock expires.
+---
 
-### Partial withdrawToSafe
+## Safe Address Management
 
-`withdrawToSafe` now accepts an `amount` parameter instead of always draining the full balance. Users can route any portion of their vault balance to the Trusted Recovery Address, leaving the remainder in the vault.
+Each user has two independent recovery slots (`safeAddresses[user][0]` and `safeAddresses[user][1]`).
+
+**Setup:** `setSafeAddress(address)` registers the first address into slot 0 with no delay. First-time setup has no attack surface, there is no existing safe address to protect.
+
+**Changes:** `requestSafeAddressChange(uint8 slot, address newSafe)` queues a change behind `SAFE_ADDRESS_CHANGE_DELAY` (24 hours). Both request and confirm are blocked during Containment Mode. Cancel is permitted.
+
+**Slots can never be cleared.** `address(0)` is never valid as a new safe address. This prevents an attacker from removing recovery options.
+
+**`withdrawToSafe`** sends any amount from the vault to either registered safe address. It is blocked during Containment Mode (absolute freeze so nothing leaves while locked) and requires no pending withdrawal exists.
+
+---
+
+## Emergency Lock (Containment Mode)
+
+`emergencyLock(uint256 duration)` activates a time-based freeze.
+
+- Duration bounded: `MIN_LOCK_DURATION` (1 hour) to `MAX_LOCK_DURATION` (30 days)
+- Extension-only: `lockedUntil` can only move forward — any call that would result in an earlier unlock reverts with `LockNotExtended`
+- **Auto-cancels all pending withdrawals** across every token in `tokenList` on activation, restoring amounts to balances
+- Blocks: `withdraw`, `executeWithdraw`, `withdrawToSafe`, `requestSafeAddressChange`, `confirmSafeAddressChange`, threshold raises, `confirmThresholdChange`
+- Permits: `cancelWithdraw`, `cancelSafeAddressChange`, `cancelThresholdChange`, threshold tightening
+The two distinct use cases this serves: short lock (1–24 hours) for active threat response while assessing the situation; long lock (days to weeks) for passive protection while offline or traveling.
 
 ---
 
 ## Intentional Design Decisions
 
-### emergencyLock accepts a user-defined duration
+### Balance deducted immediately on risky withdrawal request
 
-Rather than a hardcoded duration, `emergencyLock` accepts a `duration` parameter bounded between 1 hour and 30 days. This serves two distinct use cases — active threat response (short lock while assessing) and passive protection (long lock while offline) — that a fixed duration cannot satisfy simultaneously.
+When a withdrawal enters the Security Queue, the amount is deducted from `balances[msg.sender][token]` immediately. This prevents double-spend against funds already committed to a pending request.
+
+### One pending withdrawal per user per token
+
+A strict limit of one pending withdrawal per `(user, token)` pair prevents spamming the queue or creating ambiguous balance state.
+
+### `cancelWithdraw` does not touch `lastProbeTime`
+
+Probe state is written only when funds actually leave the vault. An attacker cannot erase their probe history by cancelling a flagged withdrawal.
+
+### Two separate functions for safe address setup vs. change
+
+`setSafeAddress` (first-time, no delay) and `requestSafeAddressChange` (subsequent changes, 24-hour delay) are distinct. Changing an existing address is high-risk and requires the delay.
+
+### `withdrawToSafe` blocked during Containment Mode
+
+Containment Mode is an absolute freeze. Allowing `withdrawToSafe` to bypass it would undermine the passive protection use case and create an attack path if the recovery address had been silently changed before the lock was triggered.
 
 ### emergencyLock can only extend, never shorten
 
 `lockedUntil` can only move forward in time. Any call where `block.timestamp + duration < lockedUntil` reverts with `LockNotExtended`. Without this, an attacker with a compromised key could reduce an active lock to regain access sooner.
 
-### Two separate functions for recovery address setup vs. change
-
-`setSafeAddress` (first-time, no delay) and `requestSafeAddressChange` (subsequent changes, 24-hour delay) are separate functions. First-time setup has no attack surface to defend. Changing an existing recovery address is high-risk and requires the delay.
-
-### Recovery address changes blocked during Containment Mode
-
-Without this block, an attacker could queue a recovery address change during a lock, wait for the change delay, confirm, then drain immediately after the lock expires. Blocking both request and confirm during Containment Mode closes this window. Cancel remains always permitted — cancelling is always a safe action.
-
-### withdrawToSafe blocked during Containment Mode
-
-Containment Mode must be an absolute freeze. Allowing `withdrawToSafe` to bypass it would undermine the passive protection use case and create an attack path if the recovery address had been silently changed before the lock was triggered.
-
-### Ledger signer removal follows the same delay pattern
-
-Removing Ledger authorization is as sensitive as adding it. Instant removal would allow an attacker with a compromised key to strip the hardware requirement and then execute a queued withdrawal. The 24-hour delay on removal gives the legitimate user time to detect and cancel.
-
-### Balance deducted immediately on risky withdrawal request
-
-When a withdrawal enters the Security Queue, the amount is deducted from `balances[msg.sender]` immediately. This prevents double-spend against funds already committed to a pending request.
-
-### One pending withdrawal per user
-
-A strict limit of one pending withdrawal per user prevents spamming the queue to exhaust the delay mechanism or create ambiguous balance state.
-
 ---
 
 ## Constants
 
-| Constant | Value | Rationale |
-| --- | --- | --- |
-| `DELAY` | 12 hours | Long enough to act on an alert, short enough not to punish legitimate users |
-| `MIN_LOCK_DURATION` | 1 hour | Prevents trivially short locks |
+| Constant | Value | Purpose |
+| ---------- | ------- | --------- |
+| `RISKY_WITHDRAWAL_DELAY` | 12 hours | Security Queue delay |
+| `MIN_LOCK_DURATION` | 1 hour | Prevents trivially short Containment Mode activations |
 | `MAX_LOCK_DURATION` | 30 days | Prevents accidental semi-permanent lockout |
-| `SAFE_ADDRESS_CHANGE_DELAY` | 24 hours | Blocks same-window rerouting attack |
-| `WINDOW_DURATION_FOR_MAX_WITHDRAW` | 72 hours | Wide enough to catch slow drain without flagging normal usage |
-| `MAX_INSTANT_WITHDRAW_PERCENT` | 30% | Cumulative threshold before Security Queue triggers |
+| `SAFE_ADDRESS_CHANGE_DELAY` | 24 hours | Blocks same-window recovery address rerouting |
+| `THRESHOLD_CHANGE_DELAY` | 24 hours | Blocks instant threshold manipulation by a compromised key |
+| `PROBE_DETECTION_WINDOW` | 72 hours | Rule 2: window during which a prior probe flags the next withdrawal |
+| `CUMULATIVE_WITHDRAW_WINDOW_DURATION` | 72 hours | Rule 3: rolling window for cumulative withdrawal tracking |
+| `MAX_CUMULATIVE_WITHDRAW_PERCENT` | 30% | Rule 3: cumulative threshold before the Security Queue triggers |
+| `DEFAULT_LARGE_WITHDRAW_PERCENT` | 60% | Rule 1 default threshold |
+| `MIN_LARGE_WITHDRAW_PERCENT` | 10% | Lower bound for user-configured Rule 1 threshold |
+| `MAX_LARGE_WITHDRAW_PERCENT` | 100% | Upper bound as 100% disables Rule 1 |
 
 ---
 
 ## Known Limitations
 
-- **Native ETH only.** ERC-20 support planned.
-- **Rule thresholds are hardcoded.** Configurable thresholds within safe bounds are a future consideration.
-- **No oracle integration.** Risk detection is purely behavioral. Does not account for external price volatility or cross-protocol context.
-- **Single recovery address.** Multi-address recovery is a potential future feature.
-- **`lastWithdrawPercent` persists indefinitely.** A legitimate user who once made a small withdrawal will have their next withdrawal flagged regardless of elapsed time. The cancel mechanism mitigates this.
-- **Frontend-only Ledger detection for non-registered users.** Users without a Ledger signer registered experience frontend-level routing only. On-chain enforcement requires prior registration.
+- **Vault-scoped protection only.** Watcher protects assets deposited into the protocol. It does not monitor arbitrary EOA transactions or assets held elsewhere.
+- **No oracle integration.** Risk detection is purely behavioral. External price volatility and cross-protocol context are not factored in.
+- **Rule 2 window is 72 hours, not indefinite.** A user who made a small withdrawal will have their next withdrawal flagged, but only for 72 hours. After `PROBE_DETECTION_WINDOW` expires, the probe flag clears automatically.
+- **Tokens cannot be removed once added.** The owner can add tokens via `addToken` but there is no removal function. A misconfigured token address is permanent.
+- **`emergencyLock` iterates `tokenList`.** Auto-cancellation on lock activation loops through all allowed tokens. Gas cost scales linearly with the number of tokens in the allowlist.
 
 ---
 
