@@ -1,13 +1,38 @@
 // Formatting/countdown helpers shared across multiple dashboard tabs
-// (Overview, Recovery, Containment, Ledger Signer). Split out from App.tsx
+// (token tabs, Recovery, Containment). Split out from App.tsx
 // so tabs can share them without an App.tsx <-> tab circular import.
 
 import { useEffect, useState } from 'react'
+import { formatUnits, parseUnits } from 'viem'
 
-// Normalizes a caught value (Error or otherwise) into a display string —
-// shared by the Ledger connect/sign flows, which surface plain-text error
-// states rather than a spinner.
+// Base units -> a rounded, human-readable string using the token's own
+// decimals (max 6 fraction digits, trailing zeros trimmed). Display only —
+// inputs are parsed with parseUnits(…, decimals). "—" while either the value
+// or the on-chain decimals are still loading.
+export function formatAmount(value: bigint | undefined, decimals: number | undefined, maxDecimals = 6): string {
+  if (value === undefined || decimals === undefined) return '—'
+  return Number(formatUnits(value, decimals)).toLocaleString(undefined, { maximumFractionDigits: maxDecimals })
+}
+
+// User-typed amount -> base units, or null if it isn't a positive number
+// representable in `decimals` places. Rejects (rather than rounds) extra
+// fraction digits so the amount sent is always exactly what was typed.
+export function parseAmount(input: string, decimals: number | undefined): bigint | null {
+  if (decimals === undefined) return null
+  const trimmed = input.trim()
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === '' || trimmed === '.') return null
+  const fraction = trimmed.split('.')[1] ?? ''
+  if (fraction.length > decimals) return null
+  const value = parseUnits(trimmed, decimals)
+  return value > 0n ? value : null
+}
+
+// wagmi/viem errors carry a one-line shortMessage; the full .message is a
+// multi-paragraph dump that's unreadable in a status line.
 export function errorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'shortMessage' in error && typeof error.shortMessage === 'string') {
+    return error.shortMessage
+  }
   if (error instanceof Error) return error.message
   return String(error)
 }

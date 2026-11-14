@@ -1,11 +1,26 @@
 [
   {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "initialTokens",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "fallback",
+    "stateMutability": "payable"
+  },
+  {
     "type": "receive",
     "stateMutability": "payable"
   },
   {
     "type": "function",
-    "name": "DELAY",
+    "name": "CUMULATIVE_WITHDRAW_WINDOW_DURATION",
     "inputs": [],
     "outputs": [
       {
@@ -18,7 +33,46 @@
   },
   {
     "type": "function",
-    "name": "MAX_INSTANT_WITHDRAW_PERCENT",
+    "name": "DEFAULT_LARGE_WITHDRAW_PERCENT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_CUMULATIVE_WITHDRAW_PERCENT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_CUMULATIVE_WITHDRAW_WAD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_LARGE_WITHDRAW_PERCENT",
     "inputs": [],
     "outputs": [
       {
@@ -44,7 +98,46 @@
   },
   {
     "type": "function",
+    "name": "MIN_LARGE_WITHDRAW_PERCENT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_LOCK_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PROBE_DETECTION_WINDOW",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "RISKY_WITHDRAWAL_DELAY",
     "inputs": [],
     "outputs": [
       {
@@ -70,7 +163,7 @@
   },
   {
     "type": "function",
-    "name": "WINDOW_DURATION_FOR_MAX_WITHDRAW",
+    "name": "THRESHOLD_CHANGE_DELAY",
     "inputs": [],
     "outputs": [
       {
@@ -83,8 +176,58 @@
   },
   {
     "type": "function",
+    "name": "WAD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addToken",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "allowedTokens",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "balances",
     "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
       {
         "name": "",
         "type": "address",
@@ -102,13 +245,6 @@
   },
   {
     "type": "function",
-    "name": "cancelLedgerSignerChange",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "cancelSafeAddressChange",
     "inputs": [],
     "outputs": [],
@@ -116,15 +252,21 @@
   },
   {
     "type": "function",
-    "name": "cancelWithdraw",
+    "name": "cancelThresholdChange",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "confirmLedgerSignerChange",
-    "inputs": [],
+    "name": "cancelWithdraw",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -137,10 +279,28 @@
   },
   {
     "type": "function",
-    "name": "deposit",
+    "name": "confirmThresholdChange",
     "inputs": [],
     "outputs": [],
-    "stateMutability": "payable"
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -160,9 +320,9 @@
     "name": "executeWithdraw",
     "inputs": [
       {
-        "name": "signature",
-        "type": "bytes",
-        "internalType": "bytes"
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -176,40 +336,16 @@
         "name": "user",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [
+      },
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getLedgerSignerState",
-    "inputs": [
-      {
-        "name": "user",
+        "name": "token",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "currentSigner",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pendingSigner",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "remainingTime",
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -228,9 +364,14 @@
     ],
     "outputs": [
       {
-        "name": "pendingSafe",
+        "name": "newSafe",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "slot",
+        "type": "uint8",
+        "internalType": "uint8"
       },
       {
         "name": "remainingTime",
@@ -246,6 +387,11 @@
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "internalType": "address"
       }
@@ -296,6 +442,11 @@
         "name": "user",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -309,10 +460,63 @@
   },
   {
     "type": "function",
+    "name": "getSafeAddresses",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[2]",
+        "internalType": "address[2]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getThresholdState",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "currentPercent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pendingPercent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "remainingTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getUserState",
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "internalType": "address"
       }
@@ -364,6 +568,11 @@
         "name": "user",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -377,10 +586,54 @@
   },
   {
     "type": "function",
+    "name": "getWindowState",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "used",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "remaining",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "windowStart",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "resetsIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "hasPendingWithdraw",
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "internalType": "address"
       }
@@ -415,46 +668,13 @@
   },
   {
     "type": "function",
-    "name": "lastWithdrawPercent",
+    "name": "lastProbeTime",
     "inputs": [
       {
         "name": "",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ledgerSigner",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "ledgerSignerChangeUnlockTime",
-    "inputs": [
+      },
       {
         "name": "",
         "type": "address",
@@ -491,14 +711,8 @@
   },
   {
     "type": "function",
-    "name": "pendingLedgerSigner",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
+    "name": "owner",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -510,7 +724,7 @@
   },
   {
     "type": "function",
-    "name": "pendingSafeAddress",
+    "name": "pendingSafeChange",
     "inputs": [
       {
         "name": "",
@@ -520,9 +734,43 @@
     ],
     "outputs": [
       {
+        "name": "newSafe",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "slot",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "unlockTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingThresholdChange",
+    "inputs": [
+      {
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "newPercent",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "unlockTime",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -531,6 +779,11 @@
     "type": "function",
     "name": "pendingWithdraw",
     "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
       {
         "name": "",
         "type": "address",
@@ -558,27 +811,8 @@
   },
   {
     "type": "function",
-    "name": "registerLedgerSigner",
-    "inputs": [
-      {
-        "name": "signer",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "requestLedgerSignerChange",
-    "inputs": [
-      {
-        "name": "newSigner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
+    "name": "renounceOwnership",
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -586,6 +820,11 @@
     "type": "function",
     "name": "requestSafeAddressChange",
     "inputs": [
+      {
+        "name": "slot",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
       {
         "name": "_newSafe",
         "type": "address",
@@ -597,38 +836,37 @@
   },
   {
     "type": "function",
-    "name": "safeAddress",
+    "name": "requestThresholdChange",
     "inputs": [
       {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
+        "name": "newPercent",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "safeChangeUnlockTime",
+    "name": "safeAddresses",
     "inputs": [
       {
         "name": "",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [
+      },
       {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -648,40 +886,26 @@
   },
   {
     "type": "function",
-    "name": "totalBalance",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "windowStartTime",
+    "name": "transferOwnership",
     "inputs": [
       {
-        "name": "",
+        "name": "newOwner",
         "type": "address",
         "internalType": "address"
       }
     ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "withdraw",
     "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
       {
         "name": "amount",
         "type": "uint256",
@@ -696,6 +920,16 @@
     "name": "withdrawToSafe",
     "inputs": [
       {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "safe",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
@@ -705,30 +939,17 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "withdrawnInWindow",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
     "type": "event",
     "name": "Deposited",
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -763,73 +984,16 @@
   },
   {
     "type": "event",
-    "name": "LedgerSignerChangeCancelled",
+    "name": "OwnershipTransferred",
     "inputs": [
       {
-        "name": "user",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "LedgerSignerChangeConfirmed",
-    "inputs": [
-      {
-        "name": "user",
+        "name": "previousOwner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "newSigner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "LedgerSignerChangeRequested",
-    "inputs": [
-      {
-        "name": "user",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newSigner",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "unlockTime",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "LedgerSignerRegistered",
-    "inputs": [
-      {
-        "name": "user",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "signer",
+        "name": "newOwner",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -845,6 +1009,12 @@
         "name": "user",
         "type": "address",
         "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "cancelledSafe",
+        "type": "address",
+        "indexed": false,
         "internalType": "address"
       }
     ],
@@ -865,6 +1035,12 @@
         "type": "address",
         "indexed": false,
         "internalType": "address"
+      },
+      {
+        "name": "slot",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
       }
     ],
     "anonymous": false
@@ -873,6 +1049,12 @@
     "type": "event",
     "name": "SafeAddressChangeRequested",
     "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
       {
         "name": "previousSafe",
         "type": "address",
@@ -884,6 +1066,12 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "slot",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
       },
       {
         "name": "unlockTime",
@@ -915,10 +1103,79 @@
   },
   {
     "type": "event",
+    "name": "ThresholdChangeApplied",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newPercent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ThresholdChangeCancelled",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "cancelledPercent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ThresholdChangeRequested",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newPercent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "unlockTime",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "WithdrawToSafe",
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -949,6 +1206,12 @@
         "internalType": "address"
       },
       {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "indexed": false,
@@ -968,6 +1231,12 @@
         "internalType": "address"
       },
       {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "indexed": false,
@@ -982,6 +1251,12 @@
     "inputs": [
       {
         "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "token",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -1024,33 +1299,6 @@
   },
   {
     "type": "error",
-    "name": "ECDSAInvalidSignature",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "ECDSAInvalidSignatureLength",
-    "inputs": [
-      {
-        "name": "length",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ECDSAInvalidSignatureS",
-    "inputs": [
-      {
-        "name": "s",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "EmergencyLockOngoing",
     "inputs": []
   },
@@ -1072,17 +1320,7 @@
   },
   {
     "type": "error",
-    "name": "InvalidSignature",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "LedgerChangeDelayNotOver",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "LedgerSignerAlreadySet",
+    "name": "InvalidSafeSlot",
     "inputs": []
   },
   {
@@ -1092,17 +1330,12 @@
   },
   {
     "type": "error",
-    "name": "NoLedgerSignerSet",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NoPendingLedgerChange",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "NoPendingSafeChange",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoPendingThresholdChange",
     "inputs": []
   },
   {
@@ -1112,12 +1345,34 @@
   },
   {
     "type": "error",
-    "name": "PendingLedgerChangeExists",
-    "inputs": []
+    "name": "OwnableInvalidOwner",
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnableUnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
     "name": "PendingSafeChangeExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PendingThresholdChangeExists",
     "inputs": []
   },
   {
@@ -1142,6 +1397,11 @@
   },
   {
     "type": "error",
+    "name": "SafeAddressNotRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "SafeAddressNotSet",
     "inputs": []
   },
@@ -1152,12 +1412,48 @@
   },
   {
     "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ThresholdChangeDelayNotOver",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ThresholdOutOfBounds",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ThresholdUnchanged",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "TimeoutNotOver",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "TransferFailed",
+    "name": "TokenAlreadyAllowed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TokenNotAllowed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UseWETH",
     "inputs": []
   }
 ]

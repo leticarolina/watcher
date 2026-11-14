@@ -22,7 +22,7 @@ createRoot(document.getElementById('root')!).render(
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/architecture" element={<ArchitecturePage />} />
-              <Route path="/app" element={<DashboardApp />} />
+              <Route path="/app/*" element={<DashboardApp />} />
             </Routes>
           </BrowserRouter>
         </RainbowKitProvider>

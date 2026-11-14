@@ -28,7 +28,6 @@ const RECOVERY_LAYER_ITEMS = [
   { name: 'Security Queue', body: '12-hour cancellable delay.' },
   { name: 'Containment Mode', body: 'Freeze all activity for up to 30 days.' },
   { name: 'Trusted Recovery Address', body: 'Instant reroute to a pre-registered wallet.' },
-  { name: 'Ledger Authorization', body: 'Optional hardware-signed early release.' },
 ] as const
 
 // Small right-pointing chevron used as the connector between pipeline
@@ -273,21 +272,6 @@ function ArchitecturePage() {
               ))}
             </ul>
           </div>
-        </div>
-      </section>
-
-      {/* Ledger Authorization callout */}
-      <section className="mx-auto max-w-3xl px-6 py-16">
-        <div className="rounded-2xl border border-teal/30 bg-teal/10 p-8 text-center">
-          <span className="text-3xl" aria-hidden="true">
-            🔑
-          </span>
-          <h2 className="mt-3 font-manrope text-xl font-bold tracking-tight text-cloud">Ledger Authorization</h2>
-          <p className="mx-auto mt-3 max-w-xl font-inter text-sm text-cloud/70 sm:text-base">
-            If a Ledger hardware signer is registered, a queued withdrawal can be authorized early with a hardware
-            signature instead of waiting the full 12 hours. Even an attacker who compromises the software wallet
-            cannot execute the withdrawal without physical access to the registered Ledger device.
-          </p>
         </div>
       </section>
 
