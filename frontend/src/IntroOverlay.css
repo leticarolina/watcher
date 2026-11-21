@@ -1,0 +1,77 @@
+/* Intro animation (~0.9s total — see IntroOverlay.tsx)
+
+     0ms – 300ms  logo scales in 0.85 → 1 with a slight overshoot
+   300ms – 550ms  hold
+   550ms – 900ms  logo zooms through (1 → 4) and fades; the Midnight overlay
+                  fades out while the page settles from 0.94 → 1 underneath */
+
+@keyframes intro-logo-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes intro-logo-out {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+@keyframes intro-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes intro-page-reveal {
+  from {
+    transform: scale(0.94);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.intro-logo {
+  opacity: 0;
+  will-change: transform, opacity;
+  /* The overshoot comes from the easing curve (y > 1), not extra keyframes.
+     The later animation in the list wins once it starts. */
+  animation:
+    intro-logo-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+    intro-logo-out 350ms cubic-bezier(0.55, 0, 0.75, 0.2) 550ms forwards;
+}
+
+.intro-overlay {
+  animation: intro-overlay-out 300ms ease-in 600ms forwards;
+}
+
+.intro-page-reveal {
+  transform-origin: 50% 40vh;
+  animation: intro-page-reveal 350ms cubic-bezier(0.22, 1, 0.36, 1) 550ms both;
+}
+
+/* The overlay is never mounted under reduced motion (see shouldPlayIntro);
+   this just guarantees the page never sits hidden. */
+@media (prefers-reduced-motion: reduce) {
+  .intro-page-reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

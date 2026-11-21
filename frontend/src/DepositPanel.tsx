@@ -6,6 +6,7 @@ import { WATCHER_ADDRESS, watcherContract } from './lib/contract'
 import { errorMessage, formatAmount, parseAmount } from './lib/format'
 import { wethAbi } from './lib/tokens'
 import type { TokenStatus } from './lib/useTokenOverview'
+import { btnPrimary, inputClass } from './ui'
 
 const ETH_DECIMALS = 18
 
@@ -156,9 +157,9 @@ function DepositPanel({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-2">
-      <p className="text-xs text-cloud/50">
+      <p className="text-xs text-sand/60">
         Wallet balance:{' '}
-        <span className="font-mono text-cloud/70">
+        <span className="font-mono text-sand">
           {formatAmount(walletBalance, decimals)} {token.symbol}
           {canWrap && <> · {formatAmount(ethBalance, ETH_DECIMALS)} ETH</>}
         </span>
@@ -171,31 +172,31 @@ function DepositPanel({
           onChange={(e) => setAmount(e.target.value)}
           placeholder={`${token.symbol} amount`}
           disabled={!holdsAnything || isBusy}
-          className="flex-1 rounded border border-cloud/20 bg-cloud/5 px-3 py-2 text-sm text-cloud placeholder:text-cloud/40 disabled:opacity-40"
+          className={inputClass}
         />
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded bg-teal px-4 py-2 text-sm font-medium text-cloud disabled:opacity-40"
+          className={btnPrimary}
         >
           Deposit
         </button>
       </div>
-      {validation && <p className="text-xs text-cloud/60">{validation}</p>}
+      {validation && <p className="text-xs text-sand/70">{validation}</p>}
       {/* Make the ETH -> WETH conversion explicit before anything is signed. */}
       {!validation && !isBusy && wrapShortfall > 0n && (
-        <p className="text-xs text-cloud/60">
+        <p className="text-xs text-sand/70">
           Will wrap {formatUnits(wrapShortfall, ETH_DECIMALS)} ETH into WETH first. Keep some ETH for
           gas.
         </p>
       )}
-      {statusLine && <p className="text-sm text-cloud/70">{statusLine}</p>}
+      {statusLine && <p className="text-sm text-sand">{statusLine}</p>}
       {(phase.step === 'wrapping' ||
         phase.step === 'approving' ||
         phase.step === 'depositing' ||
         phase.step === 'confirmed') &&
-        phase.hash && <p className="break-all text-xs text-cloud/50">tx hash: {phase.hash}</p>}
-      {phase.step === 'error' && <p className="text-xs text-red">error: {phase.message}</p>}
+        phase.hash && <p className="break-all text-xs text-sand/60">tx hash: {phase.hash}</p>}
+      {phase.step === 'error' && <p className="text-xs text-alert">error: {phase.message}</p>}
     </form>
   )
 }

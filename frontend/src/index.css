@@ -1,19 +1,73 @@
 @import "tailwindcss";
 
 @theme {
-  --color-navy: #0f172a;
-  --color-teal: #0f766e;
-  --color-amber: #f59e0b;
-  --color-red: #dc2626;
-  --color-cloud: #f8fafc;
+  /* Status hues — the only colors used to indicate state. */
+  --color-guard: #0f766e; /* Healthy / Success */
+  --color-warn: #d97706; /* Pending / Review */
+  --color-lock: #dc2626; /* Locked / Containment Mode (shares Alert red) */
+  --color-alert: #dc2626; /* Threat / Critical */
+  --color-recovery: #2563eb; /* Recovery */
 
-  --font-manrope: "Manrope", sans-serif;
-  --font-inter: "Inter", sans-serif;
+  /* Neutrals */
+  --color-midnight: #0f172a; /* primary background */
+  --color-slate: #1e293b; /* surfaces */
+  --color-stone: #334155; /* containers / borders */
+  --color-cloud: #f4efea; /* primary text */
+  --color-sand: #e6ddd5; /* muted text */
+
+  /* Landing-page only: lighter teal for accent *text* on Midnight, where
+     Guard (#0f766e) is too dark to read as text. Not a status color. */
+  --color-teal-light: #2dd4bf;
+
+  --font-inter: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Reserved for addresses / numeric data (Tailwind's font-mono). */
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 body {
   margin: 0;
-  background-color: var(--color-navy);
+  background-color: var(--color-midnight);
   color: var(--color-cloud);
   font-family: var(--font-inter);
+}
+
+/* ---------------------------------------------------------------------------
+   Status system. Pick a hue with .tone-<name>, then a treatment:
+     .status-card — hue at ~14% blended into Slate, full-hue left accent
+     .status-pill — hue at ~22% (reads clearly on Slate), no border
+     .tone-text   — the hue itself, for headings/icons
+   See src/ui.tsx for the React wrappers.
+   --------------------------------------------------------------------------- */
+@layer components {
+  .tone-guard {
+    --tone: var(--color-guard);
+  }
+  .tone-warn {
+    --tone: var(--color-warn);
+  }
+  .tone-lock {
+    --tone: var(--color-lock);
+  }
+  .tone-alert {
+    --tone: var(--color-alert);
+  }
+  .tone-recovery {
+    --tone: var(--color-recovery);
+  }
+
+  .status-card {
+    background-color: color-mix(in srgb, var(--tone) 14%, var(--color-slate));
+    border: 1px solid color-mix(in srgb, var(--tone) 22%, var(--color-stone));
+    border-left: 3px solid var(--tone);
+    border-radius: 1rem;
+  }
+
+  .status-pill {
+    background-color: color-mix(in srgb, var(--tone) 22%, transparent);
+    color: var(--tone);
+  }
+
+  .tone-text {
+    color: var(--tone);
+  }
 }

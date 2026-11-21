@@ -5,9 +5,20 @@ import { watcherAbi, watcherContract } from './lib/contract'
 import { formatAmount, formatDuration, parseAmount, useCountdownSeconds } from './lib/format'
 import type { Token } from './lib/tokens'
 import type { TokenStatus } from './lib/useTokenOverview'
-import Card from './Card'
 import ContainmentLockBanner from './ContainmentLockBanner'
 import DepositPanel from './DepositPanel'
+import { RulesSummary } from './SecurityRules'
+import {
+  ClockIcon,
+  LockIcon,
+  PageHeading,
+  Panel,
+  ShieldCheckIcon,
+  StatusCard,
+  btnPrimary,
+  btnSecondary,
+  inputClass,
+} from './ui'
 
 // Matches the ABI's getUserState(user, token) output order exactly:
 // balance, instantLimit, hasPending, pendingAmount, remainingPendingTime, isLocked, remainingLockTime
@@ -32,19 +43,18 @@ function BalanceCard({
   decimals: number | undefined
 }) {
   return (
-    <Card className="border-cloud/10 bg-cloud/5 p-5 md:col-span-2">
-      <p className="text-sm text-cloud/60">Vault Balance</p>
-      <p className="mt-1 font-manrope text-4xl font-bold text-cloud sm:text-5xl">
-        {formatAmount(balance, decimals)}{' '}
-        <span className="text-2xl font-semibold text-cloud/50">{token.symbol}</span>
+    <Panel className="p-5 md:col-span-3">
+      <p className="text-xs font-medium uppercase tracking-wider text-sand/70">Vault balance</p>
+      <p className="mt-3 text-4xl font-semibold tracking-tight text-cloud tabular-nums sm:text-5xl">
+        {formatAmount(balance, decimals)} <span className="text-2xl font-medium text-sand/60">{token.symbol}</span>
       </p>
-      <p className="mt-2 text-sm text-cloud/50">
+      <p className="mt-2 text-sm text-sand/60">
         Instant withdrawal limit:{' '}
-        <span className="font-mono text-cloud/70">
+        <span className="font-mono text-sand">
           {formatAmount(instantLimit, decimals)} {token.symbol}
         </span>
       </p>
-    </Card>
+    </Panel>
   )
 }
 
@@ -61,24 +71,24 @@ function SecurityStatusCard({
   isLocked: boolean | undefined
   hasPending: boolean | undefined
 }) {
-  const tone = isLocked ? 'locked' : hasPending ? 'pending' : 'healthy'
-
-  const toneStyles = {
-    healthy: { border: 'border-teal/30', bg: 'bg-teal/10', text: 'text-teal', dot: 'bg-teal' },
-    pending: { border: 'border-amber/30', bg: 'bg-amber/10', text: 'text-amber', dot: 'bg-amber' },
-    locked: { border: 'border-red/30', bg: 'bg-red/10', text: 'text-red', dot: 'bg-red' },
-  }[tone]
-
-  const heading = tone === 'healthy' ? 'Healthy' : tone === 'pending' ? 'Withdrawal pending' : 'Containment Mode active'
-
+  if (isLocked) {
+    return (
+      <StatusCard tone="lock" icon={<LockIcon />} label="Security status" title="Contained" className="md:col-span-2">
+        <p>Containment Mode is freezing all withdrawals.</p>
+      </StatusCard>
+    )
+  }
+  if (hasPending) {
+    return (
+      <StatusCard tone="warn" icon={<ClockIcon />} label="Security status" title="Pending review" className="md:col-span-2">
+        <p>A withdrawal is waiting in the security queue.</p>
+      </StatusCard>
+    )
+  }
   return (
-    <Card className={`flex flex-col justify-center gap-2 p-5 ${toneStyles.border} ${toneStyles.bg}`}>
-      <p className="text-sm text-cloud/60">Security Status</p>
-      <div className="flex items-center gap-2">
-        <span className={`h-2.5 w-2.5 rounded-full ${toneStyles.dot}`} />
-        <p className={`font-manrope text-lg font-semibold ${toneStyles.text}`}>{heading}</p>
-      </div>
-    </Card>
+    <StatusCard tone="guard" icon={<ShieldCheckIcon />} label="Security status" title="Healthy" className="md:col-span-2">
+      <p>All protection rules are active.</p>
+    </StatusCard>
   )
 }
 
@@ -187,7 +197,7 @@ function WithdrawForm({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder={`${token.symbol} amount`}
-          className="flex-1 rounded border border-cloud/20 bg-cloud/5 px-3 py-2 text-sm text-cloud placeholder:text-cloud/40"
+          className={inputClass}
         />
         <button
           type="submit"
@@ -202,15 +212,15 @@ function WithdrawForm({
             Boolean(isLocked) ||
             Boolean(hasPending)
           }
-          className="rounded bg-teal px-4 py-2 text-sm font-medium text-cloud disabled:opacity-40"
+          className={btnPrimary}
         >
           Withdraw
         </button>
       </div>
-      {validation && <p className="text-xs text-cloud/60">{validation}</p>}
-      {lockedReason && <p className="text-xs text-red">{lockedReason}</p>}
-      {writeError && <p className="text-xs text-red">error: {writeError.message}</p>}
-      {outcome?.kind === 'instant' && <p className="text-sm text-teal">Sent instantly</p>}
+      {validation && <p className="text-xs text-sand/70">{validation}</p>}
+      {lockedReason && <p className="text-xs text-lock">{lockedReason}</p>}
+      {writeError && <p className="text-xs text-alert">error: {writeError.message}</p>}
+      {outcome?.kind === 'instant' && <p className="text-sm font-medium text-guard">Sent instantly</p>}
     </form>
   )
 }
@@ -332,49 +342,50 @@ function SecurityQueueSection({
   // placeholder. All the hooks above still run unconditionally either way.
   if (!hasPending) return null
 
+  // Full-width Pending (Warn) action bar: what's queued on the left, the two
+  // actions on the right.
   return (
-    <Card className="space-y-3 border-amber/40 bg-amber/10 p-5 text-amber">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs opacity-70">Security Queue</p>
-          <p className="font-manrope text-3xl font-bold leading-tight">{isReady ? 'Ready' : countdownText}</p>
-          <p className="text-sm opacity-80">
-            {formatAmount(pendingAmount, decimals)} {token.symbol} queued
-          </p>
+    <div className="status-card tone-warn space-y-3 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <span className="status-pill tone-warn flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
+            <ClockIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="tone-text text-sm font-semibold">Pending withdrawal</p>
+            <p className="text-sm text-sand">
+              <span className="font-mono text-cloud">
+                {formatAmount(pendingAmount, decimals)} {token.symbol}
+              </span>
+              <span className="mx-2 text-sand/40" aria-hidden="true">
+                ·
+              </span>
+              {isReady ? 'Ready to execute' : <>Unlocks in <span className="font-mono">{countdownText}</span></>}
+            </p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleCancel}
-            disabled={isCancelBusy}
-            className="rounded border border-cloud/20 bg-cloud/10 px-4 py-2 text-sm font-medium text-cloud disabled:opacity-40"
-          >
-            Cancel Withdrawal
+          {executeDisabledReason && <span className="text-xs text-lock">{executeDisabledReason}</span>}
+          <button type="button" onClick={handleCancel} disabled={isCancelBusy} className={btnSecondary}>
+            Cancel
           </button>
-          <button
-            type="button"
-            onClick={handleExecute}
-            disabled={executeDisabled}
-            className="rounded bg-teal px-4 py-2 text-sm font-medium text-cloud disabled:opacity-40"
-          >
-            Execute Withdrawal
+          <button type="button" onClick={handleExecute} disabled={executeDisabled} className={btnPrimary}>
+            Execute
           </button>
-          {executeDisabledReason && <span className="text-xs opacity-80">{executeDisabledReason}</span>}
         </div>
       </div>
 
-      {cancelStatus && <p className="text-xs opacity-90">cancel status: {cancelStatus}</p>}
-      {cancelHash && <p className="break-all text-xs opacity-70">cancel tx hash: {cancelHash}</p>}
-      {cancelError && <p className="text-xs text-red">cancel error: {cancelError.message}</p>}
-
-      {(executeStatus || executeHash || executeError) && (
-        <div className="space-y-2 border-t border-current/10 pt-3">
-          {executeStatus && <p className="text-xs opacity-90">execute status: {executeStatus}</p>}
-          {executeHash && <p className="break-all text-xs opacity-70">execute tx hash: {executeHash}</p>}
-          {executeError && <p className="text-xs text-red">execute error: {executeError.message}</p>}
+      {(cancelStatus || cancelHash || cancelError || executeStatus || executeHash || executeError) && (
+        <div className="space-y-1 border-t border-warn/20 pt-3 text-xs">
+          {cancelStatus && <p className="text-sand">cancel status: {cancelStatus}</p>}
+          {cancelHash && <p className="break-all font-mono text-sand/60">cancel tx hash: {cancelHash}</p>}
+          {cancelError && <p className="text-alert">cancel error: {cancelError.message}</p>}
+          {executeStatus && <p className="text-sand">execute status: {executeStatus}</p>}
+          {executeHash && <p className="break-all font-mono text-sand/60">execute tx hash: {executeHash}</p>}
+          {executeError && <p className="text-alert">execute error: {executeError.message}</p>}
         </div>
       )}
-    </Card>
+    </div>
   )
 }
 
@@ -439,8 +450,15 @@ function TokenTab({
 
   const banner = isLocked && <ContainmentLockBanner lockCountdown={lockCountdown} onViewContainment={onViewContainment} />
 
+  const heading = <PageHeading title={`${token.symbol} vault`} subtitle="Your assets, secured on-chain." />
+
   if (status.isActive === undefined) {
-    return <p className="text-sm text-cloud/70">Loading {token.symbol}…</p>
+    return (
+      <div className="space-y-6">
+        {heading}
+        <p className="text-sm text-sand/70">Loading {token.symbol}…</p>
+      </div>
+    )
   }
 
   // Inactive: nothing in the wallet, nothing in the vault, nothing queued.
@@ -451,35 +469,46 @@ function TokenTab({
   // part of this token's dashboard.
   if (!status.isActive) {
     return (
-      <div className="max-w-md space-y-4">
+      <div className="space-y-6">
+        {heading}
         {banner}
-        {isAdding ? (
-          <Card className="border-cloud/10 bg-cloud/5 p-5">
-            <h3 className="mb-2 font-manrope text-sm font-semibold text-cloud/80">Add {token.symbol}</h3>
-            <DepositPanel status={status} address={address} onConfirmed={refetchAll} />
-          </Card>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsAdding(true)}
-            className="rounded-lg bg-teal px-6 py-3 font-manrope text-sm font-semibold text-cloud hover:bg-teal/90"
-          >
-            Add {token.symbol}
-          </button>
-        )}
+        <Panel className="max-w-xl p-5">
+          <p className="text-xs font-medium uppercase tracking-wider text-sand/70">Vault balance</p>
+          {isAdding ? (
+            <div className="mt-4">
+              <h3 className="mb-2 text-sm font-semibold text-cloud">Add {token.symbol}</h3>
+              <DepositPanel status={status} address={address} onConfirmed={refetchAll} />
+            </div>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-sand/70">
+                You don't have any {token.symbol} protected yet. Deposit some to put it under Watcher's rules.
+              </p>
+              <button type="button" onClick={() => setIsAdding(true)} className={btnPrimary}>
+                Add {token.symbol}
+              </button>
+            </div>
+          )}
+        </Panel>
       </div>
     )
   }
 
   return (
-    <div className="max-w-5xl space-y-4">
+    <div className="space-y-6">
+      {heading}
       {banner}
 
-      {isLoading && <p className="text-sm text-cloud/70">Loading {token.symbol} vault state…</p>}
-      {isError && <p className="text-sm text-red">Error calling getUserState: {error?.message}</p>}
+      {isLoading && <p className="text-sm text-sand/70">Loading {token.symbol} vault state…</p>}
+      {isError && <p className="text-sm text-alert">Error calling getUserState: {error?.message}</p>}
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <BalanceCard balance={userState?.[0]} instantLimit={userState?.[1]} token={token} decimals={decimals} />
+      <div className="grid gap-4 md:grid-cols-5">
+        <BalanceCard
+          balance={userState?.[0]}
+          instantLimit={userState?.[1]}
+          token={token}
+          decimals={decimals}
+        />
         <SecurityStatusCard isLocked={isLocked} hasPending={hasPending} />
       </div>
 
@@ -494,13 +523,13 @@ function TokenTab({
         onConfirmed={refetchAll}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Card className="border-cloud/10 bg-cloud/5 p-5">
-          <h3 className="mb-2 font-manrope text-sm font-semibold text-cloud/80">Deposit</h3>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Panel className="p-5">
+          <h3 className="mb-3 text-sm font-semibold text-cloud">Deposit</h3>
           <DepositPanel status={status} address={address} onConfirmed={refetchAll} />
-        </Card>
-        <Card className="border-cloud/10 bg-cloud/5 p-5">
-          <h3 className="mb-2 font-manrope text-sm font-semibold text-cloud/80">Withdraw</h3>
+        </Panel>
+        <Panel className="p-5">
+          <h3 className="mb-3 text-sm font-semibold text-cloud">Withdraw</h3>
           <WithdrawForm
             address={address}
             token={token}
@@ -511,8 +540,10 @@ function TokenTab({
             lockCountdown={lockCountdown}
             onConfirmed={refetchAll}
           />
-        </Card>
+        </Panel>
       </div>
+
+      <RulesSummary />
     </div>
   )
 }

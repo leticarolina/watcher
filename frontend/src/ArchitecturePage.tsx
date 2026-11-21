@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 // Reuses the landing page's reveal-animation keyframes (.landing-fade-up) so
 // the two pages feel like one continuous product, not two different UIs.
@@ -83,13 +84,13 @@ function CoreFlowDiagram() {
 
       {/* Withdrawal Requested */}
       <rect x={300} y={20} width={300} height={60} rx={12} fill="rgba(248,250,252,0.04)" stroke="rgba(248,250,252,0.18)" />
-      <text x={450} y={56} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={20} fill="#f8fafc">
+      <text x={450} y={56} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={20} fill="#f4efea">
         Withdrawal Requested
       </text>
 
       {/* Risk Engine */}
       <rect x={300} y={120} width={300} height={70} rx={12} fill="rgba(15,118,110,0.15)" stroke="#0f766e" strokeWidth={1.5} />
-      <text x={450} y={148} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={20} fill="#f8fafc">
+      <text x={450} y={148} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={20} fill="#f4efea">
         Risk Engine
       </text>
       <text x={450} y={170} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={13} fill="rgba(248,250,252,0.6)">
@@ -98,7 +99,7 @@ function CoreFlowDiagram() {
 
       {/* Normal branch */}
       <rect x={80} y={250} width={280} height={90} rx={12} fill="rgba(15,118,110,0.15)" stroke="#0f766e" strokeWidth={1.5} />
-      <text x={220} y={288} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={18} fill="#f8fafc">
+      <text x={220} y={288} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={18} fill="#f4efea">
         🟢 Normal
       </text>
       <text x={220} y={312} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={13} fill="rgba(248,250,252,0.65)">
@@ -106,8 +107,8 @@ function CoreFlowDiagram() {
       </text>
 
       {/* Suspicious branch */}
-      <rect x={540} y={250} width={280} height={90} rx={12} fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth={1.5} />
-      <text x={680} y={288} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={18} fill="#f8fafc">
+      <rect x={540} y={250} width={280} height={90} rx={12} fill="rgba(245,158,11,0.12)" stroke="#d97706" strokeWidth={1.5} />
+      <text x={680} y={288} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={18} fill="#f4efea">
         🟠 Suspicious
       </text>
       <text x={680} y={312} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={13} fill="rgba(248,250,252,0.65)">
@@ -116,7 +117,7 @@ function CoreFlowDiagram() {
 
       {/* Three actions during the Security Queue window */}
       <rect x={30} y={400} width={260} height={100} rx={12} fill="rgba(248,250,252,0.04)" stroke="#0f766e" strokeWidth={1.5} />
-      <text x={160} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f8fafc">
+      <text x={160} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f4efea">
         Cancel
       </text>
       <text x={160} y={460} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={12.5} fill="rgba(248,250,252,0.6)">
@@ -124,8 +125,8 @@ function CoreFlowDiagram() {
         <tspan x={160} dy={16}>instantly</tspan>
       </text>
 
-      <rect x={320} y={400} width={260} height={100} rx={12} fill="rgba(248,250,252,0.04)" stroke="#f59e0b" strokeWidth={1.5} />
-      <text x={450} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f8fafc">
+      <rect x={320} y={400} width={260} height={100} rx={12} fill="rgba(248,250,252,0.04)" stroke="#d97706" strokeWidth={1.5} />
+      <text x={450} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f4efea">
         Containment Mode
       </text>
       <text x={450} y={460} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={12.5} fill="rgba(248,250,252,0.6)">
@@ -134,7 +135,7 @@ function CoreFlowDiagram() {
       </text>
 
       <rect x={610} y={400} width={260} height={100} rx={12} fill="rgba(248,250,252,0.04)" stroke="#0f766e" strokeWidth={1.5} />
-      <text x={740} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f8fafc">
+      <text x={740} y={438} textAnchor="middle" fontFamily="Manrope, sans-serif" fontWeight={700} fontSize={17} fill="#f4efea">
         Recover Funds
       </text>
       <text x={740} y={460} textAnchor="middle" fontFamily="Inter, sans-serif" fontSize={12.5} fill="rgba(248,250,252,0.6)">
@@ -149,22 +150,30 @@ function CoreFlowDiagram() {
 // hero. Same theme/typography as LandingPage, but a normal scrolling page
 // rather than the hero's fixed h-screen layout.
 function ArchitecturePage() {
+  // React Router doesn't scroll to #hash targets on navigation — do it here
+  // so the landing nav's "How it works" / "Architecture" links land correctly.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (!hash) return
+    document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [hash])
+
   return (
-    <div className="min-h-screen w-full bg-navy text-cloud">
+    <div className="min-h-screen w-full bg-midnight text-cloud">
       {/* Same nav bar as the landing page — logo + wordmark link home,
           Connect Wallet on the right. */}
       <header className="flex items-center justify-between border-b border-cloud/10 px-6 py-4">
         <Link to="/" className="flex items-center gap-2">
           <img src="/logo-cloud.png" alt="" className="h-7 w-auto" />
-          <span className="hidden font-manrope text-base font-semibold tracking-tight sm:inline">WATCHER</span>
+          <span className="hidden font-inter text-base font-semibold tracking-tight sm:inline">WATCHER</span>
         </Link>
         <ConnectButton />
       </header>
 
       {/* Hero/intro strip */}
       <section className="landing-fade-up mx-auto max-w-3xl px-6 pb-16 pt-20 text-center">
-        <p className="font-inter text-sm font-semibold uppercase tracking-widest text-teal">How Watcher Works</p>
-        <h1 className="mt-4 font-manrope text-3xl font-bold tracking-tight text-cloud sm:text-4xl">
+        <p className="font-inter text-sm font-semibold uppercase tracking-widest text-guard">How Watcher Works</p>
+        <h1 className="mt-4 font-inter text-3xl font-bold tracking-tight text-cloud sm:text-4xl">
           A reaction window for self-custody
         </h1>
         <p className="mt-5 font-inter text-base text-cloud/70 sm:text-lg">
@@ -176,7 +185,7 @@ function ArchitecturePage() {
 
       {/* The problem */}
       <section className="mx-auto max-w-5xl px-6 py-16">
-        <h2 className="text-center font-manrope text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
+        <h2 className="text-center font-inter text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
           The Problem
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center font-inter text-cloud/60">
@@ -189,20 +198,20 @@ function ArchitecturePage() {
               key={problem.title}
               className="rounded-xl border border-cloud/15 bg-cloud/5 px-5 py-6 text-center"
             >
-              <p className="mt-3 font-manrope text-base font-semibold text-cloud">{problem.title}</p>
+              <p className="mt-3 font-inter text-base font-semibold text-cloud">{problem.title}</p>
               <p className="mt-1 font-inter text-sm text-cloud/60">{problem.body}</p>
             </div>
           ))}
         </div>
 
-        <p className="mx-auto mt-10 max-w-2xl rounded-xl border border-teal/30 bg-teal/10 px-6 py-4 text-center font-manrope text-base font-semibold text-cloud">
+        <p className="mx-auto mt-10 max-w-2xl rounded-xl border border-guard/30 bg-guard/10 px-6 py-4 text-center font-inter text-base font-semibold text-cloud">
           Today's wallets execute instantly. Watcher adds time when behavior looks wrong.
         </p>
       </section>
 
       {/* The core flow diagram — the centerpiece */}
-      <section className="mx-auto max-w-5xl px-6 py-16">
-        <h2 className="text-center font-manrope text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
+      <section id="core-flow" className="scroll-mt-6 mx-auto max-w-5xl px-6 py-16">
+        <h2 className="text-center font-inter text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
           The Core Flow
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center font-inter text-cloud/60">
@@ -215,8 +224,8 @@ function ArchitecturePage() {
       </section>
 
       {/* The three-layer architecture */}
-      <section className="mx-auto max-w-6xl px-6 py-16">
-        <h2 className="text-center font-manrope text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
+      <section id="security-engine" className="scroll-mt-6 mx-auto max-w-6xl px-6 py-16">
+        <h2 className="text-center font-inter text-2xl font-bold tracking-tight text-cloud sm:text-3xl">
           The Security Engine
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center font-inter text-cloud/60">
@@ -229,12 +238,12 @@ function ArchitecturePage() {
             <span className="text-2xl" aria-hidden="true">
               🔍
             </span>
-            <h3 className="mt-2 font-manrope text-lg font-semibold text-cloud">Behavior Inputs</h3>
+            <h3 className="mt-2 font-inter text-lg font-semibold text-cloud">Behavior Inputs</h3>
             <p className="mt-1 font-inter text-sm text-cloud/50">Three detection rules watch every withdrawal.</p>
             <ul className="mt-4 space-y-3">
               {DETECTION_RULES.map((rule) => (
                 <li key={rule.name} className="border-t border-cloud/10 pt-3 first:border-t-0 first:pt-0">
-                  <p className="font-manrope text-sm font-semibold text-cloud">{rule.name}</p>
+                  <p className="font-inter text-sm font-semibold text-cloud">{rule.name}</p>
                   <p className="mt-0.5 font-inter text-sm text-cloud/60">{rule.trigger}</p>
                 </li>
               ))}
@@ -244,11 +253,11 @@ function ArchitecturePage() {
           <StageConnector />
 
           {/* Layer 2 — Risk Engine */}
-          <div className="flex flex-1 flex-col justify-center rounded-2xl border border-teal/30 bg-teal/10 p-6 text-center lg:max-w-[280px]">
+          <div className="flex flex-1 flex-col justify-center rounded-2xl border border-guard/30 bg-guard/10 p-6 text-center lg:max-w-[280px]">
             <span className="text-2xl" aria-hidden="true">
               ⚖️
             </span>
-            <h3 className="mt-2 font-manrope text-lg font-semibold text-cloud">Risk Engine</h3>
+            <h3 className="mt-2 font-inter text-lg font-semibold text-cloud">Risk Engine</h3>
             <p className="mt-2 font-inter text-sm text-cloud/70">
               Decides whether a withdrawal is safe to execute now, or suspicious enough to hold.
             </p>
@@ -261,12 +270,12 @@ function ArchitecturePage() {
             <span className="text-2xl" aria-hidden="true">
               🛡️
             </span>
-            <h3 className="mt-2 font-manrope text-lg font-semibold text-cloud">Recovery Layer</h3>
+            <h3 className="mt-2 font-inter text-lg font-semibold text-cloud">Recovery Layer</h3>
             <p className="mt-1 font-inter text-sm text-cloud/50">What's available once something is flagged.</p>
             <ul className="mt-4 space-y-3">
               {RECOVERY_LAYER_ITEMS.map((item) => (
                 <li key={item.name} className="border-t border-cloud/10 pt-3 first:border-t-0 first:pt-0">
-                  <p className="font-manrope text-sm font-semibold text-cloud">{item.name}</p>
+                  <p className="font-inter text-sm font-semibold text-cloud">{item.name}</p>
                   <p className="mt-0.5 font-inter text-sm text-cloud/60">{item.body}</p>
                 </li>
               ))}
@@ -287,7 +296,7 @@ function ArchitecturePage() {
                 {credential.icon}
               </span>
               <div className="text-left">
-                <p className="font-manrope text-sm font-semibold text-cloud">{credential.title}</p>
+                <p className="font-inter text-sm font-semibold text-cloud">{credential.title}</p>
                 <p className="font-inter text-xs text-cloud/50">{credential.subtitle}</p>
               </div>
             </div>
@@ -299,7 +308,7 @@ function ArchitecturePage() {
       <section className="px-6 pb-24 pt-4 text-center">
         <Link
           to="/app"
-          className="inline-block rounded-lg bg-teal px-8 py-3 font-inter text-sm font-semibold text-cloud transition-colors hover:bg-teal/90 sm:text-base"
+          className="inline-block rounded-lg bg-guard px-8 py-3 font-inter text-sm font-semibold text-cloud transition-colors hover:bg-guard/90 sm:text-base"
         >
           Protect My Wallet
         </Link>
